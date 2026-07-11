@@ -1,0 +1,201 @@
+# OpenCode Rules for LinkedIn Sales Navigator Parser
+
+## Project Context
+This is a LinkedIn Sales Navigator scraper that extracts profile data from search results.
+The project uses Puppeteer for browser automation and TypeScript for type safety.
+
+## Code Style Guidelines
+
+### TypeScript
+- Use strict TypeScript with proper type annotations
+- Prefer interfaces over types for object shapes
+- Use async/await over promises
+- Always handle errors with try-catch blocks
+- Use optional chaining (?.) and nullish coalescing (??) operators
+
+### File Organization
+- Keep files under 500 lines
+- One class/module per file
+- Group related functionality into directories
+- Use barrel exports (index.ts) for clean imports
+
+### Naming Conventions
+- Files: kebab-case (e.g., card-extractor.ts)
+- Classes: PascalCase (e.g., CardExtractor)
+- Functions/methods: camelCase (e.g., extractName)
+- Constants: UPPER_SNAKE_CASE (e.g., MAX_RETRIES)
+- Interfaces: PascalCase with descriptive names (e.g., ProfileData)
+
+### Import Order
+1. External dependencies (puppeteer, fs, etc.)
+2. Internal core modules (@core/*)
+3. Internal extractors (@extractors/*)
+4. Internal utils (@utils/*)
+5. Internal storage (@storage/*)
+6. Types and interfaces
+
+### Error Handling
+- Always log errors with context
+- Use descriptive error messages
+- Fail gracefully when possible
+- Retry operations that might be transient failures
+
+### Logging
+- Use Logger class for all logging
+- Log levels: debug, info, warn, error
+- Include context in log messages (profile name, URL, etc.)
+- Don't log sensitive data
+
+## Architecture Principles
+
+### Single Responsibility
+- Each extractor handles one specific data source
+- Parser orchestrates extractors but doesn't extract data itself
+- Utils are pure functions with no side effects
+
+### Dependency Injection
+- Pass dependencies through constructors
+- Don't create dependencies inside classes
+- Makes testing easier
+
+### Separation of Concerns
+- Extractors: Data extraction logic
+- Utils: Reusable utilities
+- Storage: Data persistence
+- Core: Application orchestration
+
+## LinkedIn-Specific Rules
+
+### Anti-Detection
+- Always use stealth mode
+- Randomize delays between actions
+- Respect rate limits
+- Use human-like scrolling and clicking
+
+### Data Extraction
+- Try multiple selectors (LinkedIn changes DOM frequently)
+- Verify extracted data when possible
+- Use fuzzy matching for name/company verification
+- Handle missing data gracefully
+
+### Profile Cards vs Sidebar
+- Cards: Quick preview data (may be incomplete)
+- Sidebar: Full profile data (more reliable)
+- Always verify sidebar updated before extracting
+- Use fallback flow if card extraction fails
+
+## Testing Guidelines
+
+### Before Committing
+- Run `npm run build` to check for TypeScript errors
+- Test with small batch (10 profiles) first
+- Verify CSV output is correct
+- Check logs for errors or warnings
+
+### When Refactoring
+- Create backup before major changes
+- Test after each phase
+- Keep old code until new code is validated
+- Update tests when changing behavior
+
+## Common Pitfalls
+
+### Race Conditions
+- Always wait for sidebar to update after clicking
+- Use fuzzy matching to verify correct profile loaded
+- Don't rely on fixed timeouts alone
+
+### Duplicate Detection
+- Use search-based tracking (profiles vary across searches)
+- Fallback to name+company if URL missing
+- Never match on empty URLs
+
+### Selector Brittleness
+- Always provide multiple selector fallbacks
+- Test selectors regularly (LinkedIn changes DOM)
+- Log when selectors fail to help debugging
+
+## Commit Message Format
+
+```
+<type>: <short summary>
+
+<detailed description>
+
+<footer>
+```
+
+Types:
+- feat: New feature
+- fix: Bug fix
+- refactor: Code restructuring
+- docs: Documentation changes
+- test: Test additions/changes
+- chore: Maintenance tasks
+
+## Documentation
+
+### Code Comments
+- Explain WHY, not WHAT
+- Document complex algorithms
+- Note LinkedIn-specific quirks
+- Include examples for non-obvious code
+
+### README Updates
+- Keep quick start guide current
+- Document new flags/options
+- Update troubleshooting section
+- Include example outputs
+
+## Performance Considerations
+
+### Memory
+- Clean up ElementHandles after use
+- Don't store large objects in memory
+- Stream data to CSV incrementally
+
+### Speed
+- Run independent operations in parallel
+- Cache selectors when possible
+- Minimize page interactions
+- Use efficient DOM queries
+
+## Security
+
+### Credentials
+- Never commit credentials
+- Use environment variables
+- Don't log sensitive data
+- Sanitize URLs in logs
+
+### Data Privacy
+- Only scrape publicly available data
+- Respect LinkedIn's terms of service
+- Don't store unnecessary personal data
+- Provide data deletion mechanisms
+
+## Maintenance
+
+### Regular Tasks
+- Update dependencies monthly
+- Test against LinkedIn changes
+- Review and update selectors
+- Clean up old logs and outputs
+
+### When LinkedIn Changes
+1. Identify what changed (DOM structure, selectors, etc.)
+2. Update affected extractors
+3. Test thoroughly
+4. Document the change
+5. Update selector fallbacks
+
+## AI Assistant Guidelines
+
+When working with AI assistants on this project:
+- Always read existing code before making changes
+- Follow the established patterns and conventions
+- Test changes before committing
+- Update documentation when changing behavior
+- Ask for clarification if requirements are unclear
+- Prefer refactoring over rewriting
+- Keep changes focused and atomic

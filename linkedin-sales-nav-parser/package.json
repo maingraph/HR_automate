@@ -1,0 +1,37 @@
+{
+  "name": "linkedin-sales-nav-parser",
+  "version": "1.0.0",
+  "description": "LinkedIn Sales Navigator parser with anti-detection features",
+  "main": "dist/core/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/core/index.js",
+    "dev": "ts-node src/core/index.ts",
+    "diagnose": "ts-node scripts/diagnose.ts",
+    "test:race-fix": "ts-node scripts/test-race-condition-fix.ts",
+    "test:extraction": "ts-node scripts/test-extraction.ts",
+    "extract-raw": "ts-node scripts/extract-raw-data.ts",
+    "analyze-raw": "ts-node scripts/analyze-raw-data.ts",
+    "clean": "./scripts/clean-and-run.sh",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "linkedin",
+    "sales-navigator",
+    "scraper",
+    "parser"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "csv-writer": "^1.6.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  }
+}

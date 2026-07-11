@@ -1,0 +1,37 @@
+{
+  "delays": {
+    "betweenProfiles": { "min": 3000, "max": 7000 },
+    "scrolling": { "min": 1000, "max": 3000 },
+    "pageLoad": { "min": 2000, "max": 4000 },
+    "mouseMovement": { "min": 500, "max": 1500 }
+  },
+  "breaks": {
+    "afterProfiles": 20,
+    "duration": { "min": 30000, "max": 90000 }
+  },
+  "limits": {
+    "maxProfilesPerSession": 200,
+    "maxPagesPerSession": 10,
+    "maxProfilesPerPage": 25
+  },
+  "browser": {
+    "headless": false,
+    "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "userDataDir": ""
+  },
+  "stealth": {
+    "enableMouseMovements": true,
+    "enableRandomScrolling": true,
+    "enablePageInteractions": true,
+    "randomizeTimings": true
+  },
+  "notifications": {
+    "playSound": true,
+    "showSystemNotification": false
+  },
+  "logging": {
+    "level": "info",
+    "detailedOutput": true,
+    "saveToFile": true
+  }
+}

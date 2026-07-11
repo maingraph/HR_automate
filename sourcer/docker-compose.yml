@@ -1,0 +1,55 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build: ./backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+
+  worker:
+    build: ./backend
+    env_file: .env
+    command: celery -A app.core.celery_app worker -l info
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+
+  beat:
+    build: ./backend
+    env_file: .env
+    command: celery -A app.core.celery_app beat -l info
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+
+  tg-listener:
+    build: ./backend
+    env_file: .env
+    command: python /app/../scripts/run_telegram_listener.py
+    depends_on:
+      - api
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+      - ./scripts:/scripts
+
+  frontend:
+    build: ./frontend
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api

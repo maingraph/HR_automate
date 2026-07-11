@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RecruitAI - Settings</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts for Design System Typography -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-highest": "#dae2fd",
+                    "error-container": "#ffdad6",
+                    "surface-variant": "#dae2fd",
+                    "surface-dim": "#d2d9f4",
+                    "primary-fixed": "#e1e0ff",
+                    "primary-container": "#2e3192",
+                    "tertiary": "#002f1e",
+                    "secondary-fixed": "#d3e4fe",
+                    "on-background": "#131b2e",
+                    "surface-container": "#eaedff",
+                    "secondary-container": "#d0e1fb",
+                    "on-error": "#ffffff",
+                    "surface": "#faf8ff",
+                    "on-primary-container": "#9da1ff",
+                    "tertiary-container": "#004830",
+                    "primary-fixed-dim": "#c0c1ff",
+                    "tertiary-fixed-dim": "#68dba9",
+                    "on-tertiary-fixed": "#002114",
+                    "surface-container-low": "#f2f3ff",
+                    "surface-container-high": "#e2e7ff",
+                    "surface-tint": "#4f54b4",
+                    "secondary-fixed-dim": "#b7c8e1",
+                    "on-error-container": "#93000a",
+                    "secondary": "#505f76",
+                    "primary": "#15157d",
+                    "background": "#faf8ff",
+                    "on-tertiary-container": "#47bd8d",
+                    "on-tertiary-fixed-variant": "#005137",
+                    "outline": "#777683",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    "inverse-primary": "#c0c1ff",
+                    "inverse-on-surface": "#eef0ff",
+                    "tertiary-fixed": "#85f8c4",
+                    "on-secondary-container": "#54647a",
+                    "on-primary-fixed": "#04006d",
+                    "on-surface": "#131b2e",
+                    "on-secondary-fixed": "#0b1c30",
+                    "outline-variant": "#c7c5d4",
+                    "on-primary": "#ffffff",
+                    "on-primary-fixed-variant": "#373a9b",
+                    "on-secondary-fixed-variant": "#38485d",
+                    "inverse-surface": "#283044",
+                    "surface-bright": "#faf8ff",
+                    "on-tertiary": "#ffffff",
+                    "error": "#ba1a1a",
+                    "on-surface-variant": "#464652"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "margin": "32px",
+                    "lg": "40px",
+                    "gutter": "24px",
+                    "xl": "64px",
+                    "max_width": "1440px",
+                    "base": "4px",
+                    "xs": "8px",
+                    "sm": "16px",
+                    "md": "24px"
+            },
+            "fontFamily": {
+                    "body-sm": ["Inter"],
+                    "body-md": ["Inter"],
+                    "headline-md": ["Manrope"],
+                    "display-lg": ["Manrope"],
+                    "body-lg": ["Inter"],
+                    "label-caps": ["Inter"],
+                    "label-sm": ["Inter"],
+                    "title-sm": ["Manrope"]
+            },
+            "fontSize": {
+                    "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "body-md": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "headline-md": ["30px", {"lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "display-lg": ["48px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "label-caps": ["12px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                    "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                    "title-sm": ["20px", {"lineHeight": "1.4", "fontWeight": "600"}]
+            }
+          }
+        }
+      }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md min-h-screen flex antialiased">
+<!-- JSON Injected Component: SideNavBar -->
+<!-- Applying raw execution classes exactly as specified in JSON for shell styling -->
+<aside class="fixed left-0 top-0 flex flex-col h-full py-6 bg-white dark:bg-slate-950 text-[#2E3192] dark:text-indigo-400 font-manrope antialiased h-screen border-r border-slate-200 dark:border-slate-800 w-64 z-50">
+<!-- Brand Identity -->
+<div class="px-6 mb-8 flex items-center gap-3">
+<img alt="RecruitAI Logo" class="w-8 h-8 rounded-full" data-alt="minimalist flat geometric logo representing artificial intelligence and talent acquisition in deep indigo and white" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBzppEZEGR_UkglkhowcZCY34bGrwF9cCxquPHZaOEz7XEc3h9kuQ6csJzLV8oPp7l_HepO5jRmJY--383cJ02W7pR2hlY6qlwDQhbRQCSFnrae0Wg_hmw4cq_rU7xUptDGEZw_NFAiK4zrNYJoKk0IFin3GqnRIyvDWJele4ASsunE0hBh-qAjazspTNcyKA6KBGQ6q5P9RSpXrWxx1lEGWcllcTfHtXD1e1py4MGyiyHDUkcm-rZEsAwl9bww6NPf277snrtLQEk"/>
+<div>
+<h1 class="text-xl font-bold text-[#2E3192] dark:text-indigo-300 tracking-tight">RecruitAI</h1>
+<span class="text-xs text-slate-500 font-medium">Talent Suite</span>
+</div>
+</div>
+<!-- Primary CTA -->
+<div class="px-6 mb-margin">
+<button class="w-full bg-[#2E3192] text-white rounded-md py-2 px-4 flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all duration-200 active:scale-[0.98]">
+<span class="material-symbols-outlined text-sm">add</span>
+<span class="text-sm font-semibold">New Search</span>
+</button>
+</div>
+<!-- Navigation Links -->
+<nav class="flex flex-col gap-1 px-3 flex-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm font-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="text-sm font-medium">Candidates</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">send</span>
+<span class="text-sm font-medium">Outreach</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">bar_chart</span>
+<span class="text-sm font-medium">Analytics</span>
+</a>
+<!-- Active State Navigation -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-100 dark:bg-slate-900 text-[#2E3192] dark:text-indigo-300 font-semibold border-r-4 border-[#2E3192] active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="text-sm">Settings</span>
+</a>
+</nav>
+<!-- Footer Navigation -->
+<div class="px-3 mt-auto">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="text-sm font-medium">Help Center</span>
+</a>
+</div>
+</aside>
+<!-- JSON Injected Component: TopAppBar -->
+<header class="fixed top-0 right-0 left-64 z-40 flex justify-between items-center px-8 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md text-[#2E3192] dark:text-indigo-400 font-manrope text-sm font-medium w-full h-16 border-b border-slate-200 dark:border-slate-800" style="width: calc(100% - 16rem);">
+<!-- Search Area -->
+<div class="flex-1 flex items-center">
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+<input class="w-full bg-slate-100 dark:bg-slate-900 border-none rounded-md pl-10 pr-4 py-1.5 text-slate-900 dark:text-slate-200 text-xs focus:ring-2 focus:ring-[#2E3192] transition-shadow" placeholder="Search..." type="text"/>
+</div>
+</div>
+<!-- Global Navigation Context (Inactive for Settings page) -->
+<nav class="flex items-center gap-8 h-full pt-[1.125rem]">
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#2E3192] dark:hover:text-indigo-300 transition-colors cursor-pointer h-full border-b-2 border-transparent pb-5" href="#">Pipeline</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#2E3192] dark:hover:text-indigo-300 transition-colors cursor-pointer h-full border-b-2 border-transparent pb-5" href="#">Talent Pool</a>
+<a class="text-slate-500 dark:text-slate-400 hover:text-[#2E3192] dark:hover:text-indigo-300 transition-colors cursor-pointer h-full border-b-2 border-transparent pb-5" href="#">Team</a>
+</nav>
+<!-- Actions & Profile -->
+<div class="flex-1 flex justify-end items-center gap-5">
+<button class="text-slate-500 hover:text-[#2E3192] transition-colors"><span class="material-symbols-outlined text-xl">notifications</span></button>
+<button class="text-slate-500 hover:text-[#2E3192] transition-colors"><span class="material-symbols-outlined text-xl">history</span></button>
+<button class="bg-[#059669] text-white px-4 py-1.5 rounded-md text-xs font-semibold shadow-sm hover:bg-opacity-90 transition-all">Extend Offer</button>
+<img alt="Administrator Profile" class="w-8 h-8 rounded-full border border-slate-200 ml-2" data-alt="professional corporate headshot of a female executive in late 30s with neutral background and soft studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBTp6P5W8uu32AH-UNwga2bjxpnxbP1eCY5JycLXZabu3nDsWE4CDzjK8NVfZ1OQ8zJwLTqcdHrsAWOO-wBMwGhjpl_XhnJdXvECCgw6qNR50E1AZLd9kTFyG-7wXVBig7-f_qPJ9Rs-Vx5UHNzMMPAQw0Di8sGC5CO9jdEImyzH-wtBsPycuApXU0dth4F-ne18m4cT8hq1gMw-vXEuELragamHOuJ_O27JAQK3DzKb0crPW90Sq8mLUm847z8Ug5JZvNRnGr4mlo"/>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<!-- Using strictly Theme derived visual tokens from here inward -->
+<main class="ml-64 pt-16 w-full h-screen overflow-y-auto bg-background">
+<div class="max-w-[1440px] mx-auto p-xl">
+<!-- Page Header -->
+<div class="mb-lg">
+<h2 class="font-display-lg text-display-lg text-on-background">Workspace Settings</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-base">Manage your organization's talent suite configuration and team access.</p>
+</div>
+<!-- Settings Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-gutter">
+<!-- Card 1: Workspace Profile -->
+<section class="col-span-12 md:col-span-8 bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_4px_24px_rgba(46,49,146,0.03)]">
+<h3 class="font-title-sm text-title-sm text-on-surface mb-margin border-b border-outline-variant pb-xs">General Information</h3>
+<div class="flex gap-lg items-start">
+<div class="w-32 h-32 rounded-lg border-2 border-dashed border-outline-variant bg-surface-container flex flex-col items-center justify-center text-on-surface-variant cursor-pointer hover:border-primary transition-colors">
+<span class="material-symbols-outlined text-2xl mb-xs">upload</span>
+<span class="font-label-sm text-label-sm">Upload Logo</span>
+</div>
+<div class="flex-1 grid gap-md">
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-base">Workspace Name</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-sm py-xs font-body-sm text-body-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" type="text" value="Acme Corp Global"/>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-base">Primary Domain</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-sm py-xs font-body-sm text-body-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" type="text" value="careers.acmecorp.com"/>
+</div>
+</div>
+</div>
+</section>
+<!-- Card 2: Subscription Quick Stat -->
+<section class="col-span-12 md:col-span-4 bg-primary-container rounded-xl p-lg text-on-primary-container flex flex-col justify-between shadow-[0_8px_32px_rgba(46,49,146,0.1)] relative overflow-hidden">
+<!-- Decorative subtle gradient -->
+<div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none"></div>
+<div>
+<h3 class="font-label-caps text-label-caps opacity-80 mb-sm uppercase">Current Plan</h3>
+<div class="font-headline-md text-headline-md text-on-primary mb-xs">Enterprise Agentic</div>
+<p class="font-body-sm text-body-sm opacity-90">14 of 20 active seats used</p>
+</div>
+<div class="mt-margin">
+<button class="bg-on-primary text-primary-container font-label-sm text-label-sm px-sm py-xs rounded-md w-full hover:bg-surface-container-highest transition-colors font-semibold">Manage Billing</button>
+</div>
+</section>
+<!-- Card 3: Team Data Table -->
+<section class="col-span-12 bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_4px_24px_rgba(46,49,146,0.03)] mt-sm">
+<div class="flex justify-between items-center mb-margin border-b border-outline-variant pb-xs">
+<h3 class="font-title-sm text-title-sm text-on-surface">Team Management</h3>
+<button class="bg-primary text-on-primary font-label-sm text-label-sm px-sm py-xs rounded-md flex items-center gap-2 hover:bg-primary-fixed hover:text-on-primary-fixed transition-colors">
+<span class="material-symbols-outlined text-xs">person_add</span> Invite Member
+                        </button>
+</div>
+<div class="w-full">
+<div class="grid grid-cols-4 px-sm pb-xs font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider border-b border-outline-variant/50">
+<div class="col-span-2">Member</div>
+<div>Role</div>
+<div class="text-right">Status</div>
+</div>
+<!-- High density table rows -->
+<div class="flex flex-col">
+<div class="grid grid-cols-4 items-center px-sm py-sm border-b border-outline-variant/30 hover:bg-surface-container-low transition-colors">
+<div class="col-span-2 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-secondary-container text-on-secondary-container flex items-center justify-center font-label-sm text-label-sm font-bold">JD</div>
+<div>
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Jane Doe</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant text-[12px]">jane@acmecorp.com</div>
+</div>
+</div>
+<div>
+<span class="bg-primary-fixed-dim text-on-primary-fixed px-xs py-[2px] rounded-full font-label-sm text-label-sm">Workspace Admin</span>
+</div>
+<div class="text-right font-body-sm text-body-sm text-on-tertiary-container flex items-center justify-end gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span> Active
+                                </div>
+</div>
+<div class="grid grid-cols-4 items-center px-sm py-sm border-b border-outline-variant/30 hover:bg-surface-container-low transition-colors">
+<div class="col-span-2 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-surface-dim text-on-surface flex items-center justify-center font-label-sm text-label-sm font-bold">MS</div>
+<div>
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Mark Smith</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant text-[12px]">mark@acmecorp.com</div>
+</div>
+</div>
+<div>
+<span class="bg-surface-container-high text-on-surface px-xs py-[2px] rounded-full font-label-sm text-label-sm">Recruiter</span>
+</div>
+<div class="text-right font-body-sm text-body-sm text-on-surface-variant">
+                                    Last active 2h ago
+                                </div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</main>
+</body></html>

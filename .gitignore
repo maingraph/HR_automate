@@ -1,0 +1,54 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python / Node build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.next/
+
+# Runtime state and generated data
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.rdb
+*.session
+*.session-journal
+*.csv
+*.xlsx
+*.numbers
+output/
+logs/
+data/
+debug/
+debug-*
+*.png
+*.html
+
+# Local assistant configuration and generated diagnostics
+.agents/
+.claude/
+sourcer/supabase/.temp/
+sourcer/backend/results.txt
+sourcer/scripts/results.json
+
+# Keep intentional UI design references tracked in Sourcer
+!sourcer/stitch_sourcer_core_design_system/**
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Preserved metadata from repositories consolidated into this monorepo
+**/.git.legacy/
