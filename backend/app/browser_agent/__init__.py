@@ -1,0 +1,1 @@
+"""Interactive browser worker package."""

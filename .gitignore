@@ -8,12 +8,13 @@
 # Python / Node build artifacts
 __pycache__/
 *.py[cod]
-.venv/
+.venv*/
 venv/
 node_modules/
 dist/
 build/
 .next/
+*.tsbuildinfo
 
 # Runtime state and generated data
 *.log
@@ -28,7 +29,11 @@ build/
 *.numbers
 output/
 logs/
-data/
+data/*
+!data/uploads/
+data/uploads/*
+!data/uploads/.gitkeep
+browser-data/
 debug/
 debug-*
 *.png
@@ -37,12 +42,14 @@ debug-*
 # Local assistant configuration and generated diagnostics
 .agents/
 .claude/
-sourcer/supabase/.temp/
-sourcer/backend/results.txt
-sourcer/scripts/results.json
+archive/local-sourcer-state/
+supabase/.temp/
+backend/results.txt
+scripts/results.json
 
-# Keep intentional UI design references tracked in Sourcer
-!sourcer/stitch_sourcer_core_design_system/**
+# Keep intentional UI design references tracked
+!design/**/*.png
+!design/**/*.html
 
 # OS/editor files
 .DS_Store

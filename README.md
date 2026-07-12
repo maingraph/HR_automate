@@ -1,53 +1,103 @@
-# HR Automate
+# Sourcer
 
-Recruitment automation workspace: source candidates, map LinkedIn profiles, score matches, and run controlled outreach.
+Local, observable recruitment workspace. Run sourcing, merging, enrichment, filtering, and grading as independent tools or assemble them into a gated pipeline.
+
+## Pipeline
+
+```text
+Sales Navigator / Telegram / Apollo / file import
+                    ↓
+          explicit merge + dedup
+                    ↓
+        enrichment → rules → similarity
+                    ↓
+                AI grading
+```
+
+Every stage creates a versioned dataset. Outputs pause at a gate where they can be inspected, edited, exported, replaced through import, sealed, or passed into another stage. Partial and stopped runs remain exportable.
+
+## Interactive Sales Navigator
+
+Sourcer runs persistent Chromium in a dedicated browser-agent container and renders it in the job workspace through noVNC. Login is manual. Browser cookies stay inside a local Docker volume; LinkedIn passwords are never stored by Sourcer.
+
+Workflow:
+
+1. Start browser.
+2. Open AI-generated search.
+3. Log in or approve LinkedIn challenge if requested.
+4. Adjust Sales Navigator filters directly.
+5. Lock search.
+6. Start Sales Navigator stage.
+7. Pause safely, take manual control, resume, or hard-stop while keeping completed records.
+
+## Quick start
+
+Requirements: Docker Desktop, Supabase project, and configured `.env`.
+
+```bash
+cp .env.example .env
+# Configure Supabase, JWT, AI, and optional source credentials.
+python scripts/apply_schema.py
+docker compose up --build
+```
+
+Open:
+
+- App: `http://localhost:3000`
+- API: `http://localhost:8000/docs`
+- Embedded browser viewer: `http://127.0.0.1:6080/vnc.html`
+
+Generate a local browser-agent token before starting:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Put result in `BROWSER_AGENT_TOKEN` inside `.env`.
 
 ## Components
 
-| Path | Purpose | Stack |
-| --- | --- | --- |
-| `sourcer/` | Full recruitment pipeline: jobs, multi-source ingestion, AI scoring, outreach, reply handling | FastAPI, Celery, Redis, Supabase, Next.js |
-| `linkedin-sales-nav-parser/` | Sales Navigator search-result parser with resumable CSV export | TypeScript, Playwright |
-| `linkedin-profile-mapper/` | Detailed single-profile mapper; saves section HTML and normalized JSON | Python, Playwright, BeautifulSoup |
+| Path | Role |
+| --- | --- |
+| `backend/` | FastAPI API, Celery stages, source adapters, scoring, outreach |
+| `frontend/` | Next.js workspace, stage controls, dataset gate, noVNC embed |
+| `browser-agent/` | Persistent Chromium, Playwright controller, Xvfb/noVNC |
+| `supabase/migrations/` | Ordered database schema and migrations |
+| `scripts/` | Setup and operator utilities |
+| `archive/` | Pre-consolidation tools retained until parity is verified |
 
-## Start Sourcer
+## Dataset interchange
 
-```bash
-cd sourcer
-cp .env.example .env
-# Set required credentials in .env
-bash launch.sh
-```
+Every dataset supports:
 
-Frontend: `http://localhost:3000`
-API docs: `http://localhost:8000/docs`
+- XLSX: `Candidates` and `Metadata` sheets;
+- CSV: nested fields encoded as JSON strings;
+- JSON: lossless manifest, lineage, records, and source payloads.
 
-See [Sourcer README](sourcer/README.md) for setup, architecture, and operations.
+Editing a sealed dataset creates a child version. Existing version remains unchanged.
 
-## Run Sales Navigator parser
+## Development
 
-```bash
-cd linkedin-sales-nav-parser
-npm install
-npm run build
-npm start -- --url "YOUR_SALES_NAV_URL" --test
-```
-
-See [parser README](linkedin-sales-nav-parser/README.md) for options.
-
-## Run profile mapper
+Backend:
 
 ```bash
-cd linkedin-profile-mapper
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium
-python main.py "https://www.linkedin.com/in/PROFILE_SLUG/"
+pytest
 ```
 
-## Repository hygiene
+Frontend:
 
-Credentials, browser sessions, scraped profiles, logs, debug captures, caches, and financial-model exports are local-only. Copy environment template before running; never commit populated `.env` files.
+```bash
+cd frontend
+npm ci
+npm run build
+```
 
-Automated LinkedIn actions can trigger account restrictions and must comply with LinkedIn terms, applicable law, and candidate-consent requirements.
+## Safety
+
+Candidate data contains personal information. Keep deployment local, protect `.env`, restrict Supabase service credentials, and define retention/deletion policy before production use. LinkedIn automation can trigger account restrictions and must follow applicable terms and laws.
+
+Historical architecture notes live under `docs/history/`.
