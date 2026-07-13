@@ -43,9 +43,9 @@ docker compose up --build
 
 Open:
 
-- App: `http://localhost:3000`
-- API: `http://localhost:8000/docs`
-- Embedded browser viewer: `http://127.0.0.1:6080/vnc.html`
+- App: `http://localhost:3210`
+- API: `http://localhost:8210/docs`
+- Embedded browser viewer: `http://127.0.0.1:6210/vnc.html`
 
 Generate a local browser-agent token before starting:
 

@@ -15,4 +15,8 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+echo "Default Sourcer app:     http://localhost:3210"
+echo "Default Sourcer API:     http://localhost:8210/docs"
+echo "Default Sourcer browser: http://localhost:6210/vnc.html"
+echo "Custom .env port overrides are shown by: docker compose ps"
 docker compose up --build

@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${SOURCER_REDIS_PORT:-6389}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -19,7 +19,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     ports:
-      - "8000:8000"
+      - "${SOURCER_API_PORT:-8210}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -87,7 +87,7 @@ services:
       BROWSER_PROFILE_DIR: /browser-data/profile
       BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
     ports:
-      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:${SOURCER_BROWSER_PORT:-6210}:6080"
     volumes:
       - browser_profile:/browser-data
     healthcheck:
@@ -99,10 +99,13 @@ services:
 
   frontend:
     image: hrsourcing-frontend
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8210}
     env_file: .env
     ports:
-      - "3000:3000"
+      - "${SOURCER_FRONTEND_PORT:-3210}:3000"
     depends_on:
       - api
     restart: unless-stopped
