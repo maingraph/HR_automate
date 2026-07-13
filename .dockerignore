@@ -1,0 +1,11 @@
+.git
+.env
+archive
+design
+docs
+frontend
+data
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+**/.next

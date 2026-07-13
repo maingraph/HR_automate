@@ -11,6 +11,7 @@ services:
     restart: unless-stopped
 
   api:
+    image: hrsourcing-api
     build: ./backend
     env_file: .env
     environment:
@@ -30,7 +31,7 @@ services:
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    image: hrsourcing-api
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -46,13 +47,13 @@ services:
     restart: unless-stopped
 
   beat:
-    build: ./backend
+    image: hrsourcing-api
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-    command: celery -A app.core.celery_app beat -l info
+    command: celery -A app.core.celery_app beat -l info --schedule=/tmp/celerybeat-schedule
     depends_on:
       redis:
         condition: service_healthy
@@ -62,8 +63,10 @@ services:
     restart: unless-stopped
 
   tg-listener:
-    build: ./backend
+    image: hrsourcing-api
     env_file: .env
+    environment:
+      PYTHONPATH: /app
     command: python /app/../scripts/run_telegram_listener.py
     depends_on:
       - api
@@ -74,6 +77,7 @@ services:
     restart: unless-stopped
 
   browser-agent:
+    image: hrsourcing-browser-agent
     build:
       context: .
       dockerfile: browser-agent/Dockerfile
@@ -94,6 +98,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: hrsourcing-frontend
     build: ./frontend
     env_file: .env
     ports:
