@@ -8,7 +8,7 @@ import httpx
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 from app.core.logging import get_logger
 from app.services import datasets as dataset_service
 from app.services import stages as stage_service
@@ -19,16 +19,18 @@ log = get_logger(__name__)
 
 def _stage(stage_id: str) -> dict[str, Any]:
     result = get_supabase().table("stage_runs").select("*").eq("id", stage_id).maybe_single().execute()
-    if not result.data:
+    data = response_data(result)
+    if not data:
         raise RuntimeError(f"Stage {stage_id} not found")
-    return result.data
+    return data
 
 
 def _job(stage: dict[str, Any]) -> dict[str, Any]:
     result = get_supabase().table("jobs").select("*").eq("id", stage["job_id"]).maybe_single().execute()
-    if not result.data:
+    data = response_data(result)
+    if not data:
         raise RuntimeError(f"Job {stage['job_id']} not found")
-    return result.data
+    return data
 
 
 def _publish(stage: dict[str, Any], event: str, **data: Any) -> None:

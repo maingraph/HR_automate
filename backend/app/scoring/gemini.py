@@ -1,11 +1,11 @@
 """LLM-powered plan generation + structured candidate scoring.
 
 Supports two backends controlled by AI_PROVIDER env var:
-  - "gemini"     : direct Google Gemini API (google-generativeai SDK)
+  - "gemini"     : direct Google Gemini API (google-genai SDK)
   - "openrouter" : OpenAI-compatible proxy at openrouter.ai (openai SDK)
 
 Gemini path supports multiple API keys (GEMINI_API_KEYS, comma-separated)
-with automatic rotation on 429 ResourceExhausted.
+with automatic rotation on HTTP 429 quota errors.
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ import re
 import time
 from typing import Any
 
-import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+from google import genai
+from google.genai import errors, types
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
@@ -70,20 +70,42 @@ _exhausted_keys: set[str] = set()
 _key_pool: list[str] = []
 _key_cycle: "itertools.cycle[str] | None" = None
 _current_key: str = ""
+_current_client: genai.Client | None = None
 
 
-def _init_keys() -> None:
-    global _key_pool, _key_cycle, _current_key
+def reset_gemini_client() -> None:
+    """Reset cached key state after runtime credential changes."""
+    global _key_pool, _key_cycle, _current_key, _current_client, _exhausted_keys
+    if _current_client is not None:
+        _current_client.close()
+    _key_pool = []
+    _key_cycle = None
+    _current_key = ""
+    _current_client = None
+    _exhausted_keys = set()
+
+
+def _select_key(key: str) -> None:
+    global _current_key, _current_client
+    if _current_client is not None:
+        _current_client.close()
+    _current_key = key
+    _current_client = genai.Client(api_key=key)
+
+
+def _init_keys() -> genai.Client:
+    global _key_pool, _key_cycle
     if _key_cycle is None:
         _key_pool = _build_key_pool()
         _key_cycle = itertools.cycle(_key_pool)
-        _current_key = next(_key_cycle)
-        genai.configure(api_key=_current_key)
+        _select_key(next(_key_cycle))
         log.info("Gemini key pool: %d key(s)", len(_key_pool))
+    if _current_client is None:
+        raise RuntimeError("Gemini client failed to initialize")
+    return _current_client
 
 
 def _rotate_key(mark_exhausted: bool = False) -> None:
-    global _current_key
     if _key_cycle is None:
         _init_keys()
         return
@@ -94,14 +116,12 @@ def _rotate_key(mark_exhausted: bool = False) -> None:
     for _ in range(len(_key_pool)):
         candidate = next(_key_cycle)
         if candidate not in _exhausted_keys:
-            _current_key = candidate
-            genai.configure(api_key=_current_key)
+            _select_key(candidate)
             log.info("Rotated to Gemini key (pool=%d, exhausted=%d)", len(_key_pool), len(_exhausted_keys))
             return
     # All keys exhausted — still set the next one and hope quota reset
-    _current_key = next(_key_cycle)
+    _select_key(next(_key_cycle))
     _exhausted_keys.clear()  # reset and try again
-    genai.configure(api_key=_current_key)
     log.warning("All Gemini keys exhausted — resetting and retrying")
 
 
@@ -115,7 +135,7 @@ def _before_sleep(retry_state) -> None:
     exc = retry_state.outcome.exception()
     if exc is None:
         return
-    if isinstance(exc, ResourceExhausted) or "ResourceExhausted" in type(exc).__name__:
+    if isinstance(exc, errors.APIError) and exc.code == 429:
         msg = str(exc)
         daily = "PerDay" in msg
         _rotate_key(mark_exhausted=daily)
@@ -132,7 +152,12 @@ def _before_sleep(retry_state) -> None:
 # OpenRouter backend
 # ---------------------------------------------------------------------------
 
-def _call_openrouter(system: str, prompt: str, temperature: float = 0.3) -> str:
+def _call_openrouter(
+    system: str,
+    prompt: str,
+    temperature: float = 0.3,
+    model: str | None = None,
+) -> str:
     """Call any model via OpenRouter's OpenAI-compatible API and return raw text."""
     from openai import OpenAI  # lazy import — only needed when AI_PROVIDER=openrouter
 
@@ -144,7 +169,7 @@ def _call_openrouter(system: str, prompt: str, temperature: float = 0.3) -> str:
         api_key=settings.openrouter_api_key,
     )
     resp = client.chat.completions.create(
-        model=settings.openrouter_model,
+        model=model or settings.openrouter_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -156,8 +181,13 @@ def _call_openrouter(system: str, prompt: str, temperature: float = 0.3) -> str:
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=2, max=30))
-def _call_openrouter_retry(system: str, prompt: str, temperature: float = 0.3) -> str:
-    return _call_openrouter(system, prompt, temperature)
+def _call_openrouter_retry(
+    system: str,
+    prompt: str,
+    temperature: float = 0.3,
+    model: str | None = None,
+) -> str:
+    return _call_openrouter(system, prompt, temperature, model)
 
 
 # ---------------------------------------------------------------------------
@@ -183,15 +213,26 @@ def _json_from_text(text: str) -> Any:
         raise
 
 
-def _gen_model(system: str | None = None, temperature: float = 0.3) -> genai.GenerativeModel:
-    _init_keys()
+def _generate_gemini(
+    system: str | None,
+    prompt: str | list[str],
+    temperature: float = 0.3,
+    model: str | None = None,
+) -> str:
+    client = _init_keys()
     _rate_limit()
-    cfg: dict[str, Any] = {"response_mime_type": "application/json", "temperature": temperature}
-    return genai.GenerativeModel(
-        settings.gemini_model,
-        system_instruction=system,
-        generation_config=cfg,
+    response = client.models.generate_content(
+        model=model or settings.gemini_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            temperature=temperature,
+        ),
     )
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty response")
+    return response.text
 
 
 # ---------------------------------------------------------------------------
@@ -208,13 +249,16 @@ def _generate_plan_gemini(job: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Plan dictionary with linkedin_queries, tg_keywords, hard_filters, rubric
     """
-    model = _gen_model(build_plan_system_prompt(job), temperature=0.3)
     prompt = json.dumps(
         {k: job.get(k) for k in ("title", "description", "skills", "geo", "seniority", "budget_min", "budget_max")},
         ensure_ascii=False,
     )
-    resp = model.generate_content(prompt)
-    return _json_from_text(resp.text)
+    return _json_from_text(_generate_gemini(
+        build_plan_system_prompt(job),
+        prompt,
+        temperature=0.3,
+        model=settings.get_model_for_task("job_planning"),
+    ))
 
 
 @cache_result(ttl=604800, key_prefix="rubric")  # Cache for 7 days
@@ -229,7 +273,12 @@ def generate_plan(job: dict[str, Any]) -> dict[str, Any]:
         ensure_ascii=False,
     )
     if settings.ai_provider == "openrouter":
-        raw = _call_openrouter_retry(build_plan_system_prompt(job), prompt, temperature=0.3)
+        raw = _call_openrouter_retry(
+            build_plan_system_prompt(job),
+            prompt,
+            temperature=0.3,
+            model=settings.get_model_for_task("job_planning"),
+        )
         data = _json_from_text(raw)
     else:
         data = _generate_plan_gemini(job)
@@ -421,10 +470,14 @@ def _score_candidate_gemini(job: dict[str, Any], rubric: dict[str, Any], candida
     Returns:
         Score dictionary with score, dimensions, reasoning, red_flags
     """
-    model = _gen_model(build_score_system_prompt(job, rubric), temperature=0.2)
     prompt = _build_score_prompt(job, rubric, candidate)
-    resp = model.generate_content(prompt)
-    return _parse_score_response(_json_from_text(resp.text))
+    raw = _generate_gemini(
+        build_score_system_prompt(job, rubric),
+        prompt,
+        temperature=0.2,
+        model=settings.get_model_for_task("scoring"),
+    )
+    return _parse_score_response(_json_from_text(raw))
 
 
 @retry(stop=stop_after_attempt(8 * 4), wait=wait_exponential(min=1, max=30), before_sleep=_before_sleep)
@@ -441,10 +494,14 @@ def _score_candidates_batch_gemini(job: dict[str, Any], rubric: dict[str, Any], 
     """
     from app.scoring.prompt_builder import build_batch_score_system_prompt
     
-    model = _gen_model(build_batch_score_system_prompt(job, rubric, len(candidates)), temperature=0.2)
     prompt = _build_batch_score_prompt(job, rubric, candidates)
-    resp = model.generate_content(prompt)
-    return _parse_batch_score_response(_json_from_text(resp.text), len(candidates))
+    raw = _generate_gemini(
+        build_batch_score_system_prompt(job, rubric, len(candidates)),
+        prompt,
+        temperature=0.2,
+        model=settings.get_model_for_task("scoring"),
+    )
+    return _parse_batch_score_response(_json_from_text(raw), len(candidates))
 
 
 def _score_candidates_batch_openrouter(job: dict[str, Any], rubric: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -462,7 +519,12 @@ def _score_candidates_batch_openrouter(job: dict[str, Any], rubric: dict[str, An
     
     system_prompt = build_batch_score_system_prompt(job, rubric, len(candidates))
     prompt = _build_batch_score_prompt(job, rubric, candidates)
-    raw = _call_openrouter_retry(system_prompt, prompt, temperature=0.2)
+    raw = _call_openrouter_retry(
+        system_prompt,
+        prompt,
+        temperature=0.2,
+        model=settings.get_model_for_task("scoring"),
+    )
     return _parse_batch_score_response(_json_from_text(raw), len(candidates))
 
 
@@ -481,7 +543,12 @@ def score_candidate(job: dict[str, Any], rubric: dict[str, Any], candidate: dict
     """
     prompt = _build_score_prompt(job, rubric, candidate)
     if settings.ai_provider == "openrouter":
-        raw = _call_openrouter_retry(build_score_system_prompt(job, rubric), prompt, temperature=0.2)
+        raw = _call_openrouter_retry(
+            build_score_system_prompt(job, rubric),
+            prompt,
+            temperature=0.2,
+            model=settings.get_model_for_task("scoring"),
+        )
         return _parse_score_response(_json_from_text(raw))
     else:
         return _score_candidate_gemini(job, rubric, candidate)
@@ -536,7 +603,7 @@ def embed_texts(texts: list[str], batch_size: int = 100) -> list[list[float]]:
     Returns:
         List of embedding vectors
     """
-    _init_keys()
+    client = _init_keys()
     if not texts:
         return []
     
@@ -556,13 +623,17 @@ def embed_texts(texts: list[str], batch_size: int = 100) -> list[list[float]]:
             if not t.strip():
                 out.append([0.0] * EMBED_DIM)
                 continue
-            r = genai.embed_content(
-                model=f"models/{settings.gemini_embed_model}",
-                content=t,
-                task_type="retrieval_document",
-                output_dimensionality=EMBED_DIM,
+            r = client.models.embed_content(
+                model=settings.gemini_embed_model,
+                contents=t,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_DOCUMENT",
+                    output_dimensionality=EMBED_DIM,
+                ),
             )
-            out.append(list(r["embedding"]))
+            if not r.embeddings or not r.embeddings[0].values:
+                raise RuntimeError("Gemini returned an empty embedding")
+            out.append(list(r.embeddings[0].values))
         
         # Log progress
         if batch_end % 100 == 0 or batch_end == total:
@@ -573,15 +644,19 @@ def embed_texts(texts: list[str], batch_size: int = 100) -> list[list[float]]:
 
 @retry(stop=stop_after_attempt(8 * 4), wait=wait_exponential(min=1, max=30), before_sleep=_before_sleep)
 def embed_query(text: str) -> list[float]:
-    _init_keys()
+    client = _init_keys()
     _rate_limit()
-    r = genai.embed_content(
-        model=f"models/{settings.gemini_embed_model}",
-        content=text or "",
-        task_type="retrieval_query",
-        output_dimensionality=EMBED_DIM,
+    r = client.models.embed_content(
+        model=settings.gemini_embed_model,
+        contents=text or "",
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=EMBED_DIM,
+        ),
     )
-    return list(r["embedding"])
+    if not r.embeddings or not r.embeddings[0].values:
+        raise RuntimeError("Gemini returned an empty embedding")
+    return list(r.embeddings[0].values)
 
 
 # ---------------------------------------------------------------------------
@@ -625,19 +700,12 @@ def structure_vacancy(raw_text: str) -> dict[str, Any]:
 
 def _structure_vacancy_gemini(system_prompt: str, user_prompt: str) -> dict[str, Any]:
     """Structure vacancy using Gemini API."""
-    _init_keys()
-    _rate_limit()
-    
-    model = _gen_model()
-    response = model.generate_content(
-        [system_prompt, user_prompt],
-        generation_config=genai.GenerationConfig(
-            temperature=0.3,
-            response_mime_type="application/json",
-        ),
+    text = _generate_gemini(
+        system_prompt,
+        user_prompt,
+        temperature=0.3,
+        model=settings.get_model_for_task("vacancy_structure"),
     )
-    
-    text = response.text.strip()
     result = _json_from_text(text)
     
     # Validate and normalize
@@ -658,10 +726,10 @@ def _structure_vacancy_gemini(system_prompt: str, user_prompt: str) -> dict[str,
 def _structure_vacancy_openrouter(system_prompt: str, user_prompt: str) -> dict[str, Any]:
     """Structure vacancy using OpenRouter API."""
     text = _call_openrouter_retry(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
+        system=system_prompt,
+        prompt=user_prompt,
         temperature=0.3,
-        response_format={"type": "json_object"},
+        model=settings.get_model_for_task("vacancy_structure"),
     )
     
     result = _json_from_text(text)

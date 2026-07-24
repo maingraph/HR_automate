@@ -10,7 +10,7 @@ from typing import Any, Iterable, Optional
 
 import pandas as pd
 
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 from app.utils.text import dedup_key
 
 
@@ -50,7 +50,7 @@ def get_dataset(dataset_id: str, org_id: str) -> Optional[dict[str, Any]]:
         get_supabase().table("candidate_datasets").select("*")
         .eq("id", dataset_id).eq("org_id", org_id).maybe_single().execute()
     )
-    return result.data
+    return response_data(result)
 
 
 def list_datasets(job_id: str, org_id: str) -> list[dict[str, Any]]:
@@ -197,17 +197,21 @@ def patch_record(
     target_record_id = record_id
     if dataset["state"] == "sealed":
         target_dataset = _clone_dataset(dataset, org_id)
-        original = (
+        original_response = (
             get_supabase().table("candidate_records").select("candidate_key")
-            .eq("id", record_id).eq("dataset_id", dataset_id).maybe_single().execute().data
+            .eq("id", record_id).eq("dataset_id", dataset_id).maybe_single().execute()
         )
+        original = response_data(original_response)
         if not original:
             raise LookupError("Record not found")
-        clone_record = (
+        clone_response = (
             get_supabase().table("candidate_records").select("id")
             .eq("dataset_id", target_dataset["id"])
-            .eq("candidate_key", original["candidate_key"]).maybe_single().execute().data
+            .eq("candidate_key", original["candidate_key"]).maybe_single().execute()
         )
+        clone_record = response_data(clone_response)
+        if not clone_record:
+            raise LookupError("Cloned record not found")
         target_record_id = clone_record["id"]
     elif dataset["state"] not in ("draft", "partial"):
         raise ValueError("Dataset is not editable")

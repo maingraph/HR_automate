@@ -64,8 +64,8 @@ async def get_credentials(
         "li_at_status": li_at_status,
         "li_at_set_at": os.environ.get("LI_AT_SET_AT"),
         "tg_session_exists": tg_session_exists,
-        "openrouter_key_set": bool(os.environ.get("OPENROUTER_API_KEY")),
-        "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")),
+        "openrouter_key_set": bool(settings.openrouter_api_key),
+        "gemini_key_set": bool(settings.gemini_api_key or settings.gemini_api_keys),
         "operator_tg_username": settings.operator_telegram_username or "",
         "li_send_min_delay": settings.li_send_min_delay,
         "li_send_max_delay": settings.li_send_max_delay,
@@ -107,6 +107,7 @@ async def patch_credentials(
             updated.append("OPENROUTER_API_KEY")
         if payload.gemini_key:
             os.environ["GEMINI_API_KEY"] = payload.gemini_key
+            os.environ["GEMINI_API_KEYS"] = payload.gemini_key
             os.environ["GOOGLE_API_KEY"] = payload.gemini_key
             updated.append("GEMINI_API_KEY")
 
@@ -124,6 +125,9 @@ async def patch_credentials(
 
     from app.core.config import reload_settings
     reload_settings()
+    if payload.section == "ai":
+        from app.scoring.gemini import reset_gemini_client
+        reset_gemini_client()
     log.info("Credentials updated: %s", updated)
     return {"ok": True, "updated": updated}
 
@@ -165,7 +169,7 @@ async def get_model_config(
                 "openrouter": [...]
             },
             "current_models": {
-                "job_planning": "gemini-2.0-flash",
+                "job_planning": "gemini-2.5-flash-lite",
                 ...
             }
         }
@@ -176,17 +180,17 @@ async def get_model_config(
         "ai_provider": settings.ai_provider,
         "available_models": {
             "gemini": [
-                "gemini-2.0-flash-exp",
-                "gemini-exp-1206",
-                "gemini-2.0-flash-thinking-exp-01-21",
-                "gemini-1.5-pro",
-                "gemini-1.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3.1-flash-lite",
+                "gemini-3.5-flash-lite",
             ],
             "openrouter": [
-                "google/gemini-2.0-flash-exp:free",
-                "google/gemini-exp-1206:free",
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro",
                 "anthropic/claude-3.5-sonnet",
-                "anthropic/claude-3-opus",
                 "openai/gpt-4o",
                 "openai/gpt-4o-mini",
                 "meta-llama/llama-3.3-70b-instruct",
@@ -214,8 +218,8 @@ async def update_model_config(
         {
             "ai_provider": "gemini" | "openrouter",  # optional
             "models": {
-                "job_planning": "gemini-2.0-flash-exp",  # optional
-                "scoring": "gemini-exp-1206",  # optional
+                "job_planning": "gemini-2.5-flash-lite",  # optional
+                "scoring": "gemini-2.5-flash-lite",  # optional
                 ...
             }
         }

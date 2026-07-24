@@ -49,12 +49,12 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     gemini_api_keys: str = Field("", alias="GEMINI_API_KEYS")  # comma-separated for rotation
-    gemini_model: str = Field("gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-2.5-flash-lite", alias="GEMINI_MODEL")
     gemini_embed_model: str = Field("gemini-embedding-001", alias="GEMINI_EMBED_MODEL")
 
     # OpenRouter (OpenAI-compatible proxy — set AI_PROVIDER=openrouter to use)
     openrouter_api_key: str = Field("", alias="OPENROUTER_API_KEY")
-    openrouter_model: str = Field("google/gemini-2.0-flash-001", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field("google/gemini-2.5-flash-lite", alias="OPENROUTER_MODEL")
     ai_provider: str = Field("gemini", alias="AI_PROVIDER")  # gemini | openrouter
 
     # Task-specific model overrides (optional - falls back to default)
@@ -79,9 +79,9 @@ class Settings(BaseSettings):
     # App
     app_env: str = Field("dev", alias="APP_ENV")
     api_port: int = Field(8000, alias="API_PORT")
-    frontend_url: str = Field("http://localhost:3000", alias="FRONTEND_URL")
+    frontend_url: str = Field("http://localhost:3210", alias="FRONTEND_URL")
     browser_agent_url: str = Field("http://browser-agent:8010", alias="BROWSER_AGENT_URL")
-    browser_viewer_url: str = Field("http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale", alias="BROWSER_VIEWER_URL")
+    browser_viewer_url: str = Field("http://127.0.0.1:6210/vnc.html?autoconnect=1&resize=scale", alias="BROWSER_VIEWER_URL")
     browser_agent_token: str = Field("local-browser-agent", alias="BROWSER_AGENT_TOKEN")
     log_level: str = Field("INFO", alias="LOG_LEVEL")
 
@@ -116,7 +116,8 @@ class Settings(BaseSettings):
                   outreach_classify, outreach_draft, channel_discovery
         
         Returns:
-            Model identifier (e.g., "gemini-2.0-flash" or "google/gemini-2.0-flash-001")
+            Model identifier (e.g., "gemini-2.5-flash-lite" or
+            "google/gemini-2.5-flash-lite")
         """
         task_model_map = {
             "job_planning": self.model_job_planning,

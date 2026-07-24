@@ -1,67 +1,49 @@
 #!/usr/bin/env python3
-"""Check migration status: verify orgs/users tables + org_id columns exist."""
-import os
+"""Verify required Sourcer tables and columns exist."""
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
 
 from app.core.db import get_supabase
 
-def check_migration():
-    sb = get_supabase()
 
-    print("=== Checking migration 006 status ===\n")
+REQUIRED_SCHEMA = {
+    "orgs": "id",
+    "users": "id,org_id",
+    "jobs": "id,org_id",
+    "candidates": "id,org_id",
+    "outreach_campaigns": "id,org_id",
+    "candidate_datasets": "id,org_id,state,capabilities",
+    "candidate_records": "id,org_id,dataset_id,candidate_key",
+    "stage_runs": "id,org_id,job_id,stage_type,status",
+    "browser_sessions": "id,org_id,job_id,state",
+}
 
-    # Check orgs table
-    try:
-        r = sb.table("orgs").select("id").limit(1).execute()
-        print("✓ orgs table exists")
-        print(f"  Rows: {len(r.data or [])}")
-    except Exception as e:
-        print(f"✗ orgs table missing: {e}")
 
-    # Check users table
-    try:
-        r = sb.table("users").select("id").limit(1).execute()
-        print("✓ users table exists")
-        print(f"  Rows: {len(r.data or [])}")
-    except Exception as e:
-        print(f"✗ users table missing: {e}")
+def check_migration() -> bool:
+    client = get_supabase()
+    failures: list[str] = []
 
-    # Check org_id on jobs
-    try:
-        r = sb.table("jobs").select("id,org_id").limit(1).execute()
-        has_org_id = r.data and "org_id" in (r.data[0] if r.data else {})
-        if has_org_id:
-            print("✓ jobs.org_id exists")
-        else:
-            print("✗ jobs.org_id missing")
-    except Exception as e:
-        print(f"✗ jobs.org_id check failed: {e}")
+    print("=== Sourcer schema readiness ===")
+    for table, columns in REQUIRED_SCHEMA.items():
+        try:
+            client.table(table).select(columns).limit(1).execute()
+            print(f"✓ {table}: {columns}")
+        except Exception as exc:
+            failures.append(table)
+            print(f"✗ {table}: {type(exc).__name__}: {exc}")
 
-    # Check org_id on candidates
-    try:
-        r = sb.table("candidates").select("id,org_id").limit(1).execute()
-        has_org_id = r.data and "org_id" in (r.data[0] if r.data else {})
-        if has_org_id:
-            print("✓ candidates.org_id exists")
-        else:
-            print("✗ candidates.org_id missing")
-    except Exception as e:
-        print(f"✗ candidates.org_id check failed: {e}")
+    if failures:
+        print(f"\nSchema incomplete: {', '.join(failures)}")
+        return False
+    print("\nSchema ready.")
+    return True
 
-    # Check org_id on outreach_campaigns
-    try:
-        r = sb.table("outreach_campaigns").select("id,org_id").limit(1).execute()
-        has_org_id = r.data and "org_id" in (r.data[0] if r.data else {})
-        if has_org_id:
-            print("✓ outreach_campaigns.org_id exists")
-        else:
-            print("✗ outreach_campaigns.org_id missing")
-    except Exception as e:
-        print(f"✗ outreach_campaigns.org_id check failed: {e}")
 
 if __name__ == "__main__":
-    check_migration()
+    raise SystemExit(0 if check_migration() else 1)

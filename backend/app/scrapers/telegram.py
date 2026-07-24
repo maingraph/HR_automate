@@ -360,14 +360,21 @@ def discover_channels(job: dict, validate: bool = True) -> list[dict]:
         system_prompt = "You are an expert recruiter who knows all the major Telegram channels for tech recruitment."
         
         if settings.ai_provider == "openrouter":
-            raw = _call_openrouter_retry(system_prompt, prompt, temperature=0.3)
+            raw = _call_openrouter_retry(
+                system_prompt,
+                prompt,
+                temperature=0.3,
+                model=settings.get_model_for_task("channel_discovery"),
+            )
         else:
             # Use Gemini
-            import google.generativeai as genai
-            from app.scoring.gemini import _gen_model
-            model = _gen_model(system_prompt, temperature=0.3)
-            resp = model.generate_content(prompt)
-            raw = resp.text
+            from app.scoring.gemini import _generate_gemini
+            raw = _generate_gemini(
+                system_prompt,
+                prompt,
+                temperature=0.3,
+                model=settings.get_model_for_task("channel_discovery"),
+            )
         
         # Parse response
         data = _json_from_text(raw)

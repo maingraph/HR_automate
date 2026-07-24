@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.celery_app import celery_app
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 from app.core.logging import get_logger
 from app.core.redis_client import cache_result
 
@@ -60,8 +60,9 @@ def _get_campaign_with_job(sb, campaign_id: str) -> tuple[dict[str, Any], dict[s
             .maybe_single()
             .execute()
         )
-        if job_r.data:
-            job = job_r.data
+        job_data = response_data(job_r)
+        if job_data:
+            job = job_data
 
     return campaign, job
 
@@ -71,9 +72,9 @@ def _load_context(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Return (lead, campaign, job, conversation_history)."""
     lead_r = sb.table("outreach_leads").select("*").eq("id", lead_id).maybe_single().execute()
-    if not lead_r.data:
+    lead = response_data(lead_r)
+    if not lead:
         raise RuntimeError(f"Lead {lead_id} not found")
-    lead: dict[str, Any] = lead_r.data
 
     # Use cached campaign + job context
     campaign, job = _get_campaign_with_job(sb, lead["campaign_id"])

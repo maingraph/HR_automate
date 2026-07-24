@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUser, get_current_user
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 from app.core.logging import get_logger
 from app.scoring.gemini import _call_openrouter_retry
 
@@ -231,10 +231,11 @@ async def get_campaign(
 ) -> dict[str, Any]:
     sb = get_supabase()
     r = sb.table("outreach_campaigns").select("*").eq("id", campaign_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not r.data:
+    campaign_data = response_data(r)
+    if not campaign_data:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    campaign = dict(r.data)
+    campaign = dict(campaign_data)
 
     # attach stats
     stats_r = (
@@ -309,7 +310,7 @@ async def start_campaign(
 
     sb = get_supabase()
     r = sb.table("outreach_campaigns").select("id, status").eq("id", campaign_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not r.data:
+    if not response_data(r):
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     sb.table("outreach_campaigns").update({"status": "active", "updated_at": _now_iso()}).eq(
@@ -353,7 +354,7 @@ async def import_xlsx(
 ) -> dict[str, Any]:
     sb = get_supabase()
     r = sb.table("outreach_campaigns").select("id").eq("id", campaign_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not r.data:
+    if not response_data(r):
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     data = await file.read()
@@ -492,9 +493,9 @@ async def send_to_lead(
     sb = get_supabase()
 
     lead_r = sb.table("outreach_leads").select("*").eq("id", lead_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not lead_r.data:
+    lead = response_data(lead_r)
+    if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    lead = lead_r.data
 
     campaign_r = (
         sb.table("outreach_campaigns")
@@ -504,9 +505,9 @@ async def send_to_lead(
         .maybe_single()
         .execute()
     )
-    if not campaign_r.data:
+    campaign = response_data(campaign_r)
+    if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    campaign = campaign_r.data
 
     channel = (payload.channel if payload else None) or lead.get("preferred_channel") or "telegram"
 
@@ -648,9 +649,9 @@ async def send_reply(
     """Send a manual reply to a lead and record it."""
     sb = get_supabase()
     lead_r = sb.table("outreach_leads").select("*").eq("id", lead_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not lead_r.data:
+    lead = response_data(lead_r)
+    if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    lead = lead_r.data
 
     from app.outreach.sender import send_linkedin_playwright, send_telegram
 
@@ -743,9 +744,9 @@ async def approve_draft(
     """Approve a Copilot AI draft (optionally edit it) and send it."""
     sb = get_supabase()
     lead_r = sb.table("outreach_leads").select("*").eq("id", lead_id).eq("org_id", current.org_id).maybe_single().execute()
-    if not lead_r.data:
+    lead = response_data(lead_r)
+    if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    lead = lead_r.data
 
     if not lead.get("needs_review"):
         raise HTTPException(status_code=400, detail="This lead has no pending draft to approve")

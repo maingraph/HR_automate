@@ -1,11 +1,14 @@
 """Tests for Gemini response-parsing helpers.
 
-Pure parsing logic only — no API calls. Covers code-fence stripping,
-lenient JSON extraction, score clamping, and batch validation.
+No live API calls. Covers response parsing and current google-genai adapter behavior.
 """
+from types import SimpleNamespace
+
 import pytest
 
+import app.scoring.gemini as gemini
 from app.scoring.gemini import (
+    _generate_gemini,
     _json_from_text,
     _parse_batch_score_response,
     _parse_score_response,
@@ -104,3 +107,62 @@ class TestParseBatchScoreResponse:
         assert out[0]["score"] == 0
         assert out[0]["dimensions"] == {}
         assert out[0]["red_flags"] == []
+
+
+class TestGoogleGenAIAdapter:
+    def test_generate_uses_current_client_api(self, monkeypatch):
+        calls = []
+
+        class Models:
+            def generate_content(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(text='{"ok": true}')
+
+        client = SimpleNamespace(models=Models())
+        monkeypatch.setattr(gemini, "_init_keys", lambda: client)
+        monkeypatch.setattr(gemini, "_rate_limit", lambda: None)
+
+        result = _generate_gemini(
+            "Return JSON",
+            "ping",
+            temperature=0.2,
+            model="gemini-test-model",
+        )
+
+        assert result == '{"ok": true}'
+        assert calls[0]["model"] == "gemini-test-model"
+        assert calls[0]["contents"] == "ping"
+        assert calls[0]["config"].system_instruction == "Return JSON"
+        assert calls[0]["config"].response_mime_type == "application/json"
+
+    def test_generate_rejects_empty_response(self, monkeypatch):
+        client = SimpleNamespace(
+            models=SimpleNamespace(
+                generate_content=lambda **_: SimpleNamespace(text=None)
+            )
+        )
+        monkeypatch.setattr(gemini, "_init_keys", lambda: client)
+        monkeypatch.setattr(gemini, "_rate_limit", lambda: None)
+
+        with pytest.raises(RuntimeError, match="empty response"):
+            _generate_gemini(None, "ping")
+
+    def test_embeddings_use_values_from_new_response_shape(self, monkeypatch):
+        calls = []
+
+        class Models:
+            def embed_content(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    embeddings=[SimpleNamespace(values=[0.25] * gemini.EMBED_DIM)]
+                )
+
+        monkeypatch.setattr(gemini, "_init_keys", lambda: SimpleNamespace(models=Models()))
+        monkeypatch.setattr(gemini, "_rate_limit", lambda: None)
+
+        vectors = gemini.embed_texts(["candidate profile"])
+
+        assert len(vectors) == 1
+        assert len(vectors[0]) == gemini.EMBED_DIM
+        assert calls[0]["model"] == gemini.settings.gemini_embed_model
+        assert calls[0]["config"].task_type == "RETRIEVAL_DOCUMENT"

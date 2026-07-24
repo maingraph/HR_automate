@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 
 
 STAGE_TYPES = {
@@ -48,7 +48,7 @@ def get_stage(stage_id: str, org_id: str) -> Optional[dict[str, Any]]:
         get_supabase().table("stage_runs").select("*")
         .eq("id", stage_id).eq("org_id", org_id).maybe_single().execute()
     )
-    return result.data
+    return response_data(result)
 
 
 def list_stages(job_id: str, org_id: str) -> list[dict[str, Any]]:
@@ -88,11 +88,12 @@ def create_stage(
     if stage_type not in STAGE_TYPES:
         raise ValueError("Unknown stage type")
     if idempotency_key:
-        existing = (
+        response = (
             get_supabase().table("stage_runs").select("*")
             .eq("job_id", job_id).eq("org_id", org_id)
-            .eq("idempotency_key", idempotency_key).maybe_single().execute().data
+            .eq("idempotency_key", idempotency_key).maybe_single().execute()
         )
+        existing = response_data(response)
         if existing:
             return existing, False
     validate_inputs(input_dataset_ids, org_id, stage_type)

@@ -9,6 +9,11 @@ from redis import Redis
 from .config import settings
 
 
+def response_data(response):
+    """Return PostgREST data across client versions, including empty maybe_single."""
+    return getattr(response, "data", None)
+
+
 @lru_cache
 def get_supabase() -> Client:
     key = settings.supabase_service_role_key

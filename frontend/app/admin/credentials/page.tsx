@@ -344,8 +344,8 @@ export default function CredentialsPage() {
         <div className="bg-[var(--panel2)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm text-[var(--fg2)]">
           <p className="mb-2">Configure which AI models are used for different tasks. Each task can use a different model for optimal cost/performance.</p>
           <p className="text-xs text-[var(--muted)]">
-            💡 Tip: Use faster/cheaper models (like gemini-2.0-flash-exp) for high-volume tasks (scoring), 
-            and more capable models (like gemini-exp-1206) for complex reasoning (job planning).
+            💡 Tip: Use a low-cost model such as gemini-2.5-flash-lite for high-volume scoring,
+            and gemini-2.5-pro only when a task needs deeper reasoning.
           </p>
         </div>
 
@@ -369,7 +369,7 @@ export default function CredentialsPage() {
               value={models.job_planning}
               onChange={(e) => setModels({...models, job_planning: e.target.value})}
             >
-              <option value="">Use default ({aiProvider === "gemini" ? "gemini-2.0-flash" : "google/gemini-2.0-flash-001"})</option>
+              <option value="">Use default ({aiProvider === "gemini" ? "gemini-2.5-flash-lite" : "google/gemini-2.5-flash-lite"})</option>
               {availableModels[aiProvider].map(model => (
                 <option key={model} value={model}>{model}</option>
               ))}

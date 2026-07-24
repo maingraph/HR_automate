@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
-from app.core.db import get_supabase
+from app.core.db import get_supabase, response_data
 from app.schemas.workflow import (
     BrowserOpenSearch,
     BrowserSessionCreate,
@@ -39,9 +39,10 @@ def _job(job_id: str, user: CurrentUser) -> dict[str, Any]:
         get_supabase().table("jobs").select("*")
         .eq("id", job_id).eq("org_id", user.org_id).maybe_single().execute()
     )
-    if not result.data:
+    job = response_data(result)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return result.data
+    return job
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -344,10 +345,11 @@ async def create_browser_session(
     current: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     _job(payload.job_id, current)
-    existing = (
+    existing_response = (
         get_supabase().table("browser_sessions").select("*")
-        .eq("job_id", payload.job_id).eq("org_id", current.org_id).maybe_single().execute().data
+        .eq("job_id", payload.job_id).eq("org_id", current.org_id).maybe_single().execute()
     )
+    existing = response_data(existing_response)
     if existing:
         session = existing
     else:
@@ -372,10 +374,11 @@ async def get_browser_session(
     session_id: str,
     current: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    session = (
+    response = (
         get_supabase().table("browser_sessions").select("*")
-        .eq("id", session_id).eq("org_id", current.org_id).maybe_single().execute().data
+        .eq("id", session_id).eq("org_id", current.org_id).maybe_single().execute()
     )
+    session = response_data(response)
     if not session:
         raise HTTPException(status_code=404, detail="Browser session not found")
     return session
@@ -387,10 +390,11 @@ async def get_job_browser_session(
     current: CurrentUser = Depends(get_current_user),
 ) -> Optional[dict[str, Any]]:
     _job(job_id, current)
-    return (
+    response = (
         get_supabase().table("browser_sessions").select("*")
-        .eq("job_id", job_id).eq("org_id", current.org_id).maybe_single().execute().data
+        .eq("job_id", job_id).eq("org_id", current.org_id).maybe_single().execute()
     )
+    return response_data(response)
 
 
 @router.post("/browser-sessions/{session_id}/open-search")

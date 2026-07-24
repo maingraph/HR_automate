@@ -78,16 +78,22 @@ Return STRICT JSON only — no markdown:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _call_llm(system: str, prompt: str) -> str:
+def _call_llm(system: str, prompt: str, task: str) -> str:
     """Call the configured LLM backend (OpenRouter or Gemini)."""
     if settings.ai_provider == "openrouter":
-        return _call_openrouter_retry(system, prompt, temperature=0.5)
-    else:
-        # Gemini path — reuse the same model factory from gemini.py
-        from app.scoring.gemini import _gen_model, _json_from_text
-        model = _gen_model(system_instruction=system, temperature=0.5)
-        resp = model.generate_content(prompt)
-        return resp.text
+        return _call_openrouter_retry(
+            system,
+            prompt,
+            temperature=0.5,
+            model=settings.get_model_for_task(task),
+        )
+    from app.scoring.gemini import _generate_gemini
+    return _generate_gemini(
+        system,
+        prompt,
+        temperature=0.5,
+        model=settings.get_model_for_task(task),
+    )
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
@@ -129,7 +135,7 @@ def classify_intent(
         ensure_ascii=False,
     )
     try:
-        raw = _call_llm(_CLASSIFY_SYSTEM, prompt)
+        raw = _call_llm(_CLASSIFY_SYSTEM, prompt, "outreach_classify")
         result = _parse_json(raw)
         intent = result.get("intent", "other")
         if intent not in ("interested", "questions", "declined", "other"):
@@ -188,7 +194,7 @@ def draft_reply(
     )
 
     try:
-        raw = _call_llm(system, prompt)
+        raw = _call_llm(system, prompt, "outreach_draft")
         result = _parse_json(raw)
         draft = (result.get("draft") or "").strip()
         if not draft:
