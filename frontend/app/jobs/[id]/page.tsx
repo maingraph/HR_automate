@@ -94,6 +94,7 @@ export default function JobPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [logs, setLogs] = useState<PipelineRun[]>([]);
   const [hasModularData, setHasModularData] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "sources" | "pipeline" | "candidates" | "outreach" | "activity">("overview");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   
   // Filter state
@@ -231,6 +232,7 @@ export default function JobPage() {
   const isPaused = job?.status === "paused";
   const isDone = job?.status === "done";
   const hasError = job?.status === "error";
+  const showLegacyCandidates = activeTab === "candidates" && !hasModularData;
 
   // Actions
   const pauseJob = async () => {
@@ -350,9 +352,32 @@ export default function JobPage() {
         </div>
       )}
 
-      <WorkflowWorkspace jobId={params.id} />
+      <nav className="border-b border-[var(--border)]" aria-label="Job workspace">
+        <div className="flex gap-1 overflow-x-auto">
+          {[
+            ["overview", "Overview"], ["sources", "Sources"], ["pipeline", "Combined pipeline"],
+            ["candidates", "Candidates"], ["outreach", "Outreach"], ["activity", "Activity"],
+          ].map(([id, label]) => <button key={id} onClick={() => setActiveTab(id as typeof activeTab)} className={`px-3 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === id ? "border-[var(--accent)] text-[var(--fg)]" : "border-transparent text-[var(--muted)] hover:text-[var(--fg)]"}`}>{label}</button>)}
+        </div>
+      </nav>
 
-      {!hasModularData && <>
+      {activeTab === "overview" && <>
+        <Card className="p-5 border-[var(--accent)]/40">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--accent)] mb-2">Next action</div>
+          <div className="flex flex-wrap items-center gap-4"><div className="flex-1"><h2 className="font-semibold text-[var(--fg)]">Start or review a source</h2><p className="text-sm text-[var(--muted)] mt-1">Sales Navigator, Telegram, Apollo, and file imports stay separate until you explicitly combine their datasets.</p></div><button onClick={() => setActiveTab("sources")} className="btn-primary px-4 py-2">Open sources</button></div>
+        </Card>
+        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {[["travel_explore", "Sales Navigator", "Search → lock → extract → review"], ["send", "Telegram", "Channels → configure → extract → review"], ["person_search", "Apollo", "Configure → preview → extract → review"], ["upload_file", "File import", "Upload → validate → review"]].map(([icon, title, detail]) => <button key={title} onClick={() => setActiveTab("sources")} className="text-left rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 hover:border-[var(--accent)]"><span className="material-symbols-outlined text-[var(--accent)]">{icon}</span><div className="font-medium text-[var(--fg)] mt-2">{title}</div><div className="text-xs text-[var(--muted)] mt-1">{detail}</div></button>)}
+        </div>
+        <Card className="p-5"><div className="flex flex-wrap items-center gap-4"><div className="flex-1"><h2 className="font-semibold text-[var(--fg)]">Combined pipeline</h2><p className="text-sm text-[var(--muted)] mt-1">Select approved source datasets only when you want to merge, enrich, filter, analyse, or grade them.</p></div><button onClick={() => setActiveTab("pipeline")} className="btn-secondary px-4 py-2">Open combined pipeline</button></div></Card>
+      </>}
+      {activeTab === "sources" && <WorkflowWorkspace jobId={params.id} mode="sources" />}
+      {activeTab === "pipeline" && <WorkflowWorkspace jobId={params.id} mode="pipeline" />}
+      {activeTab === "candidates" && hasModularData && <WorkflowWorkspace jobId={params.id} mode="datasets" />}
+      {activeTab === "outreach" && <Card className="p-5"><h2 className="font-semibold text-[var(--fg)]">Outreach</h2><p className="text-sm text-[var(--muted)] mt-1">Outreach stays separate from sourcing. Use an approved graded dataset when you are ready to prepare a campaign.</p><a href="/outreach/new" className="btn-primary inline-flex mt-4 px-4 py-2">Create outreach campaign</a></Card>}
+      {activeTab === "activity" && <Card className="overflow-hidden"><div className="p-4 border-b border-[var(--border)]"><h2 className="font-semibold text-[var(--fg)]">Activity</h2></div><div className="divide-y divide-[var(--border)]">{logs.length ? logs.map(log => <div key={log.id} className="p-4 flex flex-wrap gap-x-4 gap-y-1 text-sm"><span className="font-medium text-[var(--fg)]">{log.stage}</span><span className="text-[var(--muted)]">{log.status === "ok" ? "Completed" : log.status === "error" ? "Needs attention" : "In progress"}</span><span className="text-[var(--muted)]">{log.count} candidates</span><span className="text-xs text-[var(--muted)]">{new Date(log.started_at).toLocaleString()}</span></div>) : <div className="p-8 text-center text-[var(--muted)]">No activity yet</div>}</div></Card>}
+
+      {showLegacyCandidates && <>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-4">
