@@ -21,8 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from telethon import TelegramClient
-from telethon.tl.types import Message
+from telethon import TelegramClient, functions
+from telethon.tl.types import Channel, Chat, Message
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -40,6 +40,43 @@ SESSION_DIR.mkdir(parents=True, exist_ok=True)
 # Scraper uses its OWN session file so it never conflicts with the
 # persistent telegram_listener (which holds sourcer_session open 24/7).
 _SCRAPER_SESSION_NAME = "sourcer_scraper"
+
+
+async def search_public_channels_async(query: str, limit: int = 12) -> list[dict[str, str]]:
+    """Search Telegram's public directory using Sourcer's read-only scraper session."""
+    query = query.strip()
+    if len(query) < 2:
+        raise ValueError("Enter at least two characters to search Telegram channels")
+    if not settings.telegram_api_id or not settings.telegram_api_hash:
+        raise ValueError("Telegram API credentials are not configured")
+    scraper_session = SESSION_DIR / _SCRAPER_SESSION_NAME
+    listener_session = SESSION_DIR / settings.telegram_session_name
+    session_path = str(scraper_session if scraper_session.with_suffix(".session").exists() else listener_session)
+    client = TelegramClient(session_path, settings.telegram_api_id, settings.telegram_api_hash)
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            raise ValueError("Telegram needs a one-time login confirmation before channel search")
+        response = await client(functions.contacts.SearchRequest(q=query, limit=max(1, min(limit, 30))))
+        results: list[dict[str, str]] = []
+        for chat in response.chats:
+            if not isinstance(chat, (Channel, Chat)):
+                continue
+            username = getattr(chat, "username", None)
+            if not username:
+                continue
+            results.append({
+                "handle": f"@{username}",
+                "title": getattr(chat, "title", username),
+                "kind": "group" if getattr(chat, "megagroup", False) else "channel",
+            })
+        return results[:limit]
+    finally:
+        await client.disconnect()
+
+
+def search_public_channels(query: str, limit: int = 12) -> list[dict[str, str]]:
+    return asyncio.run(search_public_channels_async(query, limit))
 
 
 def _channel_slug(url_or_handle: str) -> str:

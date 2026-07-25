@@ -5,7 +5,7 @@ import { useWebSocket } from "@/lib/hooks/useWebSocket";
 import {
   BrowserSession, CandidateDataset, CandidateRecord, StageRun, StageType,
   applyBrowserFilters, browserCommand, browserInput, controlStage, createBrowserSession, createStage, deleteRecord, downloadDataset,
-  getBrowserFilterPlan, getJobBrowserSession, getRecords, importDataset, listDatasets, listStages, patchRecord, previewImport,
+  getBrowserFilterPlan, getJobBrowserSession, getRecords, importDataset, listDatasets, listStages, patchRecord, previewImport, searchTelegramChannels, TelegramChannelResult,
 } from "@/lib/workflow";
 
 const CATALOG: Array<{ type: StageType; label: string; icon: string; phase: number; description: string; source?: boolean; requires?: string }> = [
@@ -201,6 +201,10 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const [salesnavLimit, setSalesnavLimit] = useState(3);
   const [telegramChannels, setTelegramChannels] = useState("");
   const [telegramKeywords, setTelegramKeywords] = useState("");
+  const [telegramQuery, setTelegramQuery] = useState("");
+  const [telegramMatches, setTelegramMatches] = useState<TelegramChannelResult[]>([]);
+  const [telegramSearching, setTelegramSearching] = useState(false);
+  const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { data: event } = useWebSocket<any>(`/ws/jobs/${jobId}`);
@@ -215,7 +219,31 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   useEffect(() => { if (!event) return; load(); if (event.type === "browser.auth_required") { try { const context = new AudioContext(); const oscillator = context.createOscillator(); oscillator.connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.2); new Notification("Sourcer needs LinkedIn approval", { body: "Complete login in embedded browser." }); } catch {} } }, [event]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission(); }, []);
 
-  const latest = useMemo(() => Object.fromEntries(CATALOG.map(item => [item.type, stages.filter(s => s.stage_type === item.type).at(-1)])), [stages]);
+  const pipelineKeyByStage = useMemo(() => {
+    const producer = new Map(stages.filter(stage => stage.output_dataset_id).map(stage => [stage.output_dataset_id!, stage]));
+    const keys = new Map<string, string>();
+    for (const stage of stages) {
+      const inputKeys = [...new Set(stage.input_dataset_ids.map(id => producer.get(id)).filter(Boolean).map(parent => keys.get(parent!.id)).filter(Boolean))] as string[];
+      if (CATALOG.find(item => item.type === stage.stage_type)?.source) keys.set(stage.id, `root:${stage.id}`);
+      else if (inputKeys.length === 1) keys.set(stage.id, inputKeys[0]);
+      else if (inputKeys.length > 1) keys.set(stage.id, `merge:${stage.id}`);
+      else keys.set(stage.id, `orphan:${stage.id}`);
+    }
+    return keys;
+  }, [stages]);
+  const pipelines = useMemo(() => {
+    const grouped = new Map<string, StageRun[]>();
+    stages.forEach(stage => { const key = pipelineKeyByStage.get(stage.id)!; grouped.set(key, [...(grouped.get(key) || []), stage]); });
+    return [...grouped.entries()].map(([id, runs]) => {
+      const root = runs[0];
+      const source = CATALOG.find(item => item.type === root.stage_type)?.label || root.stage_type;
+      return { id, runs, root, label: id.startsWith("merge:") ? `Combined pipeline · ${source}` : `${source} pipeline`, createdAt: root.created_at };
+    }).sort((left, right) => Date.parse(right.createdAt || "0") - Date.parse(left.createdAt || "0"));
+  }, [stages, pipelineKeyByStage]);
+  const activePipeline = pipelines.find(pipeline => pipeline.id === activePipelineId) || pipelines[0];
+  const activeStages = activePipeline?.runs || [];
+  const latest = useMemo(() => Object.fromEntries(CATALOG.map(item => [item.type, activeStages.filter(s => s.stage_type === item.type).at(-1)])), [activeStages]);
+  useEffect(() => { if (activePipeline && activePipelineId !== activePipeline.id) setActivePipelineId(activePipeline.id); }, [activePipeline, activePipelineId]);
   const run = async (type: StageType) => {
     if (type === "file_import") { fileRef.current?.click(); return; }
     const config: Record<string, unknown> = {};
@@ -235,7 +263,8 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
       config.channels = channels;
       config.keywords = telegramKeywords.split(",").map(value => value.trim()).filter(Boolean);
     }
-    await createStage(jobId, { stage_type: type, input_dataset_ids: CATALOG.find(v => v.type === type)?.source ? [] : selectedInputs, config });
+    const stage = await createStage(jobId, { stage_type: type, input_dataset_ids: CATALOG.find(v => v.type === type)?.source ? [] : selectedInputs, config });
+    if (CATALOG.find(v => v.type === type)?.source) setActivePipelineId(`root:${stage.id}`);
     await load();
   };
   const control = async (run: StageRun, action: "pause" | "resume" | "stop" | "skip" | "rerun" | "continue") => { await controlStage(run.id, action); await load(); };
@@ -244,7 +273,19 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     if (!confirm(`Import ${preview.row_count} rows with ${preview.columns.length} detected columns?`)) return;
     const dataset = await importDataset(jobId, file); await load(); setSelectedDataset(dataset);
   };
-  const salesnavRun = latest.salesnav_extract;
+  const findTelegramChannels = async () => {
+    setTelegramSearching(true); setError(null);
+    try { setTelegramMatches(await searchTelegramChannels(telegramQuery)); }
+    catch (searchError) { setError(searchError instanceof Error ? searchError.message : "Telegram channel search failed"); }
+    finally { setTelegramSearching(false); }
+  };
+  const addTelegramChannel = (handle: string) => {
+    const current = telegramChannels.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
+    if (!current.includes(handle)) setTelegramChannels([...current, handle].join(", "));
+  };
+  const rootRun = activePipeline?.root;
+  const rootType = rootRun?.stage_type;
+  const sourceRun = rootRun;
   const runForDataset = useMemo(() => new Map(stages.filter(stage => stage.output_dataset_id).map(stage => [stage.output_dataset_id!, stage])), [stages]);
   const formatTime = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "Unknown time";
   const duration = (stage?: StageRun) => {
@@ -253,7 +294,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   };
   const useOnlySource = () => {
-    const output = salesnavRun?.output_dataset_id;
+    const output = sourceRun?.output_dataset_id;
     if (!output) return;
     setSelectedInputs([output]);
   };
@@ -265,9 +306,9 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const completedAfter = (run?: StageRun, upstream?: StageRun) =>
     run?.status === "completed"
     && (!upstream?.created_at || !run.created_at || Date.parse(run.created_at) >= Date.parse(upstream.created_at));
-  const extractDone = salesnavRun?.status === "completed";
-  const mergeDone = extractDone && completedAfter(latest.merge_dedup, salesnavRun);
-  const enrichInput = latest.merge_dedup?.status === "completed" ? latest.merge_dedup : salesnavRun;
+  const extractDone = sourceRun?.status === "completed";
+  const mergeDone = extractDone && completedAfter(latest.merge_dedup, sourceRun);
+  const enrichInput = latest.merge_dedup?.status === "completed" ? latest.merge_dedup : sourceRun;
   const enrichDone = Boolean(enrichInput && completedAfter(latest.profile_enrich, enrichInput));
   const rulesDone = enrichDone && completedAfter(latest.rules_filter, latest.profile_enrich);
   const similarityDone = rulesDone && completedAfter(latest.similarity_analyze, latest.rules_filter);
@@ -287,35 +328,36 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     action: "browser",
     label: "Go to browser",
   };
-  if (!browser) {
+  if (!activePipeline) {
+    guide = { title: "Choose or start a pipeline", detail: "Pipelines keep Sales Navigator, Telegram, imports, and their later stages separate.", action: "pipelines", label: "Choose pipeline" };
+  } else if (rootType === "salesnav_extract" && !browser) {
     guide = { title: "Start embedded browser", detail: "Start browser, sign in once, then prepare Sales Navigator search.", action: "browser", label: "Go to browser" };
-  } else if (!browser.locked_search_url) {
+  } else if (rootType === "salesnav_extract" && !browser?.locked_search_url) {
     guide = { title: "Lock reviewed SalesNav search", detail: "Apply job filters, inspect results, then click Lock search.", action: "browser", label: "Go to browser" };
-  } else if (!salesnavRun) {
+  } else if (rootType === "salesnav_extract" && !sourceRun) {
     guide = { title: `Extract ${salesnavLimit} SalesNav profiles`, detail: "Creates editable source dataset. No merge, enrichment, or grading starts automatically.", action: "run", label: `Start ${salesnavLimit}-profile extraction`, stage: "salesnav_extract" };
-  } else if (["pending", "running", "pause_requested"].includes(salesnavRun.status)) {
+  } else if (rootType === "salesnav_extract" && sourceRun && ["pending", "running", "pause_requested"].includes(sourceRun.status)) {
     guide = { title: "Extraction running", detail: `Watch progress on Sales Navigator card. Pause finishes current profile; Stop now preserves flushed rows.` };
-  } else if (salesnavRun.status === "paused") {
+  } else if (rootType === "salesnav_extract" && sourceRun?.status === "paused") {
     guide = { title: "Extraction paused safely", detail: "Resume from saved checkpoint without duplicating current candidate.", action: "resume", label: "Resume extraction" };
-  } else if (salesnavRun.status === "awaiting_auth") {
+  } else if (rootType === "salesnav_extract" && sourceRun?.status === "awaiting_auth") {
     guide = { title: "LinkedIn approval required", detail: "Complete challenge in embedded browser, then press Auth complete on Sales Navigator card.", action: "browser", label: "Go to browser" };
-  } else if (salesnavRun.status === "awaiting_user") {
+  } else if (sourceRun?.status === "awaiting_user") {
     guide = { title: "Review collected candidates", detail: "Open output dataset, inspect/edit/export. When satisfied, use Seal & continue on Sales Navigator card.", action: "review", label: "Open source dataset" };
-  } else if (["failed", "stopped"].includes(salesnavRun.status)) {
-    guide = { title: "Extraction needs retry", detail: salesnavRun.error || "Previous run stopped. Existing flushed rows remain available.", action: "rerun", label: "Rerun extraction" };
+  } else if (sourceRun && ["failed", "stopped"].includes(sourceRun.status)) {
+    guide = { title: "Source run needs retry", detail: sourceRun.error || "Previous run stopped. Existing flushed rows remain available.", action: "rerun", label: "Rerun source" };
   } else {
     const downstream: StageType[] = ["merge_dedup", "profile_enrich", "rules_filter", "similarity_analyze", "ai_grade"];
     const nextType = downstream.find(type => {
       const currentRun = latest[type];
-      const upstreamType = type === "merge_dedup" ? "salesnav_extract" : downstream[downstream.indexOf(type) - 1];
-      const upstreamRun = upstreamType ? latest[upstreamType] : undefined;
+      const upstreamRun = type === "merge_dedup" ? sourceRun : latest[downstream[downstream.indexOf(type) - 1]];
       if (!currentRun || currentRun.status !== "completed") return true;
       return Boolean(upstreamRun?.created_at && currentRun.created_at && Date.parse(upstreamRun.created_at) > Date.parse(currentRun.created_at));
     });
     if (!nextType) {
       guide = { title: "Pipeline complete", detail: "Review graded dataset or export any earlier dataset version." };
-    } else if (nextType === "merge_dedup" && selectedInputs.length === 0 && salesnavRun.output_dataset_id) {
-      guide = { title: "Choose how to continue", detail: "Add another source and merge, or carry this Sales Navigator dataset forward by itself.", action: "source-only", label: "Use this source only" };
+    } else if (nextType === "merge_dedup" && selectedInputs.length === 0 && sourceRun?.output_dataset_id) {
+      guide = { title: "Choose how to continue", detail: "Add another source and merge, or carry this source dataset forward by itself.", action: "source-only", label: "Use this source only" };
     } else if (nextType === "profile_enrich" && selectedInputs.length > 0 && !latest.profile_enrich) {
       guide = { title: "Enrichment is optional", detail: "Run deeper enrichment, or create a traceable pass-through version and continue without it.", action: "skip-enrich", label: "Skip enrichment" };
     } else if (latest[nextType]?.status === "awaiting_user") {
@@ -335,6 +377,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const executeGuide = async () => {
     const guideRun = guide.stage ? latest[guide.stage] : undefined;
     if (guide.action === "browser") document.getElementById("browser-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (guide.action === "pipelines") document.getElementById("pipeline-selector")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "datasets") document.getElementById("datasets-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "run" && guide.stage) await run(guide.stage);
     if (guide.action === "resume" && guideRun) await control(guideRun, "resume");
@@ -349,6 +392,10 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   return <div className="space-y-5">
     {error && <div className="p-3 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}
     <BrowserPanel jobId={jobId} session={browser} onSession={setBrowser} />
+    <div id="pipeline-selector" className="rounded-xl border border-[var(--accent)]/40 bg-[var(--panel)] p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="text-[10px] uppercase tracking-widest text-[var(--accent)]">Pipeline selector</div><div className="font-semibold text-[var(--fg)] mt-1">Choose one source path</div><div className="text-xs text-[var(--muted)] mt-1">Next action and stage status only use selected pipeline. Other source runs cannot leak into it.</div></div>{activePipeline && <div className="text-xs text-[var(--muted)]">{activePipeline.runs.length} stage run(s)</div>}</div>
+      <div className="flex flex-wrap gap-2 mt-3">{pipelines.map(pipeline => <button key={pipeline.id} onClick={() => { setActivePipelineId(pipeline.id); setSelectedInputs([]); }} className={`rounded-lg border px-3 py-2 text-left text-xs ${activePipeline?.id === pipeline.id ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--fg)]" : "border-[var(--border)] text-[var(--muted)]"}`}><div className="font-medium">{pipeline.label}</div><div className="mt-1">{formatTime(pipeline.createdAt)} · {pipeline.runs.at(-1)?.status || "pending"}</div></button>)}</div>
+    </div>
     <div className="rounded-xl border border-[var(--accent)]/50 bg-[var(--accent)]/10 p-4">
       <div className="text-[10px] uppercase tracking-widest text-[var(--accent)] mb-2">Next action</div>
       <div className="flex flex-wrap items-center gap-4">
@@ -359,12 +406,12 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
         {phaseSteps.map((step, index) => <div key={step.label} className={`rounded-lg border px-3 py-2 text-xs ${step.status === "done" ? "border-green-500/40 bg-green-500/10 text-green-300" : step.status === "current" ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--fg)]" : "border-[var(--border)] text-[var(--muted)]"}`}><span className="mr-1">{step.status === "done" ? "✓" : index + 1}.</span>{step.label}</div>)}
       </div>
     </div>
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h2 className="font-semibold text-[var(--fg)]">Stage workspace</h2><p className="text-xs text-[var(--muted)]">Every stage pauses at output gate. Select sealed or partial datasets as next inputs.</p></div><div className="flex items-center gap-2"><label className="text-xs text-[var(--muted)]">SalesNav profiles <input type="number" min={1} max={200} value={salesnavLimit} onChange={event => setSalesnavLimit(Math.max(1, Math.min(200, Number(event.target.value) || 1)))} className="input ml-1 w-20 text-sm" /></label><button onClick={() => fileRef.current?.click()} className="btn-secondary text-xs px-3 py-1.5">Import dataset</button></div></div>
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h2 className="font-semibold text-[var(--fg)]">Stage workspace · {activePipeline?.label || "choose pipeline"}</h2><p className="text-xs text-[var(--muted)]">Pipeline lanes stay separate. Every output pauses for review.</p></div><div className="flex items-center gap-2"><label className="text-xs text-[var(--muted)]">SalesNav profiles <input type="number" min={1} max={200} value={salesnavLimit} onChange={event => setSalesnavLimit(Math.max(1, Math.min(200, Number(event.target.value) || 1)))} className="input ml-1 w-20 text-sm" /></label><button onClick={() => fileRef.current?.click()} className="btn-secondary text-xs px-3 py-1.5">Import dataset</button></div></div>
       <input ref={fileRef} className="hidden" type="file" accept=".xlsx,.xls,.csv,.json" onChange={e => e.target.files?.[0] && upload(e.target.files[0]).catch(err => setError(err.message))} />
-      <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3"><div className="text-sm font-medium text-[var(--fg)]">Telegram source setup</div><div className="text-xs text-[var(--muted)] mt-1">Credentials connect the account; channel handles define what to scan. A run without channels is blocked.</div><div className="grid md:grid-cols-2 gap-2 mt-3"><input value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="Channels: @channel_one, @channel_two" className="input text-sm" /><input value={telegramKeywords} onChange={event => setTelegramKeywords(event.target.value)} placeholder="Optional keywords, comma-separated" className="input text-sm" /></div></div>
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">{CATALOG.map(def => <StageCard key={def.type} definition={def} run={latest[def.type]} selectedInputs={selectedInputs} onRun={() => run(def.type).catch(e => setError(e.message))} onControl={action => latest[def.type] && control(latest[def.type]!, action).catch(e => setError(e.message))} onSelectOutput={() => { const id = latest[def.type]?.output_dataset_id; setSelectedDataset(datasets.find(d => d.id === id) || null); }} />)}</div>
+      <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3"><div className="text-sm font-medium text-[var(--fg)]">Telegram source setup</div><div className="text-xs text-[var(--muted)] mt-1">Search public channels, add chosen handles, then start Telegram source run.</div><div className="flex gap-2 mt-3"><input value={telegramQuery} onChange={event => setTelegramQuery(event.target.value)} onKeyDown={event => event.key === "Enter" && findTelegramChannels()} placeholder="Search Telegram channels, e.g. python jobs" className="input text-sm flex-1" /><button disabled={telegramSearching || telegramQuery.trim().length < 2} onClick={() => findTelegramChannels()} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">{telegramSearching ? "Searching…" : "Find channels"}</button></div>{telegramMatches.length > 0 && <div className="flex flex-wrap gap-2 mt-3">{telegramMatches.map(match => <button key={match.handle} onClick={() => addTelegramChannel(match.handle)} className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--accent)]"><span className="text-[var(--fg)]">{match.title}</span><span className="text-[var(--muted)]"> · {match.handle} · {match.kind}</span></button>)}</div>}<div className="grid md:grid-cols-2 gap-2 mt-3"><input value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="Chosen channels: @channel_one, @channel_two" className="input text-sm" /><input value={telegramKeywords} onChange={event => setTelegramKeywords(event.target.value)} placeholder="Optional candidate keywords, comma-separated" className="input text-sm" /></div></div>
+      <div className="space-y-5">{[["1 · Sources", CATALOG.filter(def => def.phase === 1)], ["2 · Assemble", CATALOG.filter(def => def.phase === 2)], ["3–6 · Improve and rank", CATALOG.filter(def => def.phase >= 3)]].map(([title, definitions]) => <section key={String(title)}><div className="text-xs uppercase tracking-widest text-[var(--muted)] mb-2">{String(title)}</div><div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">{(definitions as typeof CATALOG).map(def => <StageCard key={def.type} definition={def} run={latest[def.type]} selectedInputs={selectedInputs} onRun={() => run(def.type).catch(e => setError(e.message))} onControl={action => latest[def.type] && control(latest[def.type]!, action).catch(e => setError(e.message))} onSelectOutput={() => { const id = latest[def.type]?.output_dataset_id; setSelectedDataset(datasets.find(d => d.id === id) || null); }} />)}</div></section>)}</div>
     </div>
-    <div id="datasets-workspace" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="font-medium text-[var(--fg)] mb-1">Available datasets</div><div className="text-xs text-[var(--muted)] mb-3">Grouped by the run that produced them. Select sealed or partial versions as inputs.</div><div className="space-y-3">{datasets.map(dataset => { const stage = runForDataset.get(dataset.id); const label = stage ? `${CATALOG.find(item => item.type === stage.stage_type)?.label || stage.stage_type} · run ${stage.attempt}` : "Imported or legacy dataset"; return <div key={dataset.id} className={`rounded-lg border p-3 ${selectedInputs.includes(dataset.id) ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)]"}`}><div className="flex flex-wrap items-center gap-x-3 gap-y-2"><label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" checked={selectedInputs.includes(dataset.id)} onChange={e => setSelectedInputs(e.target.checked ? [...selectedInputs, dataset.id] : selectedInputs.filter(id => id !== dataset.id))} /><span className="font-medium text-[var(--fg)]">{label}</span></label><span className="text-xs text-[var(--muted)]">{formatTime(stage?.created_at || dataset.created_at)}{duration(stage) ? ` · ${duration(stage)}` : ""}</span><span className="text-xs text-[var(--muted)]">{dataset.row_count} rows · {dataset.state}</span><button type="button" onClick={() => setSelectedDataset(dataset)} className="ml-auto text-xs text-[var(--accent)] hover:underline">Preview</button></div><div className="text-xs text-[var(--muted)] mt-1">{dataset.name} · {dataset.kind} · v{dataset.id.slice(0, 8)}</div></div>; })}</div></div>
+    <div id="datasets-workspace" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="font-medium text-[var(--fg)] mb-1">Available datasets</div><div className="text-xs text-[var(--muted)] mb-3">Run groups. Current pipeline first. Check datasets only within selected pipeline.</div><div className="space-y-5">{pipelines.map(pipeline => { const pipelineDatasetIds = new Set(pipeline.runs.map(stage => stage.output_dataset_id).filter(Boolean)); const groupedDatasets = datasets.filter(dataset => pipelineDatasetIds.has(dataset.id)); if (!groupedDatasets.length) return null; return <section key={pipeline.id} className={`rounded-lg border p-3 ${activePipeline?.id === pipeline.id ? "border-[var(--accent)]/50" : "border-[var(--border)]"}`}><div className="flex items-center justify-between gap-3 mb-2"><button onClick={() => { setActivePipelineId(pipeline.id); setSelectedInputs([]); }} className="text-left"><div className="text-sm font-medium text-[var(--fg)]">{pipeline.label}</div><div className="text-xs text-[var(--muted)]">Started {formatTime(pipeline.createdAt)} · {pipeline.runs.length} stage run(s)</div></button>{activePipeline?.id === pipeline.id && <span className="text-[10px] text-[var(--accent)] uppercase">Selected pipeline</span>}</div><div className="space-y-2">{groupedDatasets.map(dataset => { const stage = runForDataset.get(dataset.id); return <div key={dataset.id} className={`rounded border p-2 ${selectedInputs.includes(dataset.id) ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)]"}`}><div className="flex flex-wrap items-center gap-x-3 gap-y-2"><label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" disabled={activePipeline?.id !== pipeline.id} checked={selectedInputs.includes(dataset.id)} onChange={e => setSelectedInputs(e.target.checked ? [...selectedInputs, dataset.id] : selectedInputs.filter(id => id !== dataset.id))} /><span className="font-medium text-[var(--fg)]">{CATALOG.find(item => item.type === stage?.stage_type)?.label || dataset.kind} · run {stage?.attempt || 1}</span></label><span className="text-xs text-[var(--muted)]">{formatTime(stage?.created_at || dataset.created_at)}{duration(stage) ? ` · ${duration(stage)}` : ""} · {dataset.row_count} rows · {dataset.state}</span><button type="button" onClick={() => setSelectedDataset(dataset)} className="ml-auto text-xs text-[var(--accent)] hover:underline">Preview</button></div><div className="text-[11px] text-[var(--muted)] mt-1">{dataset.name} · {dataset.kind} · v{dataset.id.slice(0, 8)}</div></div>; })}</div></section>; })}</div></div>
     {selectedDataset && <DatasetGate dataset={selectedDataset} onChanged={next => { if (next) setSelectedDataset(next); load(); }} />}
   </div>;
 }

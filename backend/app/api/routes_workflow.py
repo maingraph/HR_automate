@@ -127,6 +127,20 @@ async def get_job_datasets(
     return dataset_service.list_datasets(job_id, current.org_id)
 
 
+@router.get("/telegram/channels/search")
+def search_telegram_channels(
+    q: str = Query(..., min_length=2, max_length=100),
+    current: CurrentUser = Depends(get_current_user),
+) -> list[dict[str, str]]:
+    """Find public Telegram channels before adding them to a source run."""
+    del current
+    try:
+        from app.scrapers.telegram import search_public_channels
+        return search_public_channels(q)
+    except Exception as exc:
+        raise _http_error(exc)
+
+
 @router.post("/stage-runs/{stage_id}/pause", response_model=StageRunOut)
 async def pause_stage(stage_id: str, current: CurrentUser = Depends(get_current_user)) -> dict[str, Any]:
     try:

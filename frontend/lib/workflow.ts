@@ -63,9 +63,11 @@ export type BrowserFilterPlan = {
   seniority?: string | null;
   notes: string[];
 };
+export type TelegramChannelResult = { handle: string; title: string; kind: string };
 
 export const listStages = (jobId: string) => apiFetch<StageRun[]>(`/jobs/${jobId}/stage-runs`);
 export const listDatasets = (jobId: string) => apiFetch<CandidateDataset[]>(`/jobs/${jobId}/datasets`);
+export const searchTelegramChannels = (query: string) => apiFetch<TelegramChannelResult[]>(`/telegram/channels/search?q=${encodeURIComponent(query)}`);
 export const createStage = (jobId: string, body: { stage_type: StageType; input_dataset_ids: string[]; config?: Record<string, unknown> }) =>
   apiFetch<StageRun>(`/jobs/${jobId}/stage-runs`, {
     method: "POST",
