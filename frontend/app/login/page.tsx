@@ -11,7 +11,6 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [orgName, setOrgName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +24,7 @@ export default function LoginPage() {
       const body =
         mode === "login"
           ? { email, password }
-          : { email, password, org_name: orgName };
+          : { email, password, org_name: `${email.split("@")[0] || "My"} workspace` };
 
       const res = await fetch(`${API}${endpoint}`, {
         method: "POST",
@@ -35,7 +34,11 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `${res.status} ${res.statusText}`);
+        let message = `${res.status} ${res.statusText}`;
+        try {
+          message = JSON.parse(text).detail || message;
+        } catch {}
+        throw new Error(message);
       }
 
       const data: AuthResponse = await res.json();
@@ -49,23 +52,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#faf8ff] px-4">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--background)] px-4">
       <div className="w-full max-w-md">
         {/* Logo + Title */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#15157d] text-white text-2xl font-bold mb-4 shadow-lg">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[var(--accent)] text-white text-2xl font-bold mb-4 shadow-lg">
             S
           </div>
           <h1 className="text-3xl font-bold text-[#131b2e] mb-2" style={{ fontFamily: "Manrope" }}>
-            Executive Talent Engine
+            Sourcer
           </h1>
           <p className="text-[#464652]" style={{ fontFamily: "Inter" }}>
-            AI-powered recruitment sourcing
+            Sign in or create your private sourcing workspace
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-lg border border-[#c7c5d4] p-8 shadow-sm">
+        <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] p-8 shadow-sm">
           {/* Mode Toggle */}
           {registrationEnabled && <div className="flex gap-2 mb-6 p-1 bg-[#f2f3ff] rounded-lg">
             <button
@@ -94,27 +97,10 @@ export default function LoginPage() {
             </button>
           </div>}
 
-          {/* Form */}
+          {mode === "register" && <p className="text-sm text-[var(--muted)] mb-4">Workspace creates automatically from your email.</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === "register" && (
-              <div>
-                <label className="block text-sm font-medium text-[#131b2e] mb-1.5" style={{ fontFamily: "Inter" }}>
-                  Organization Name
-                </label>
-                <input
-                  type="text"
-                  value={orgName}
-                  onChange={(e) => setOrgName(e.target.value)}
-                  required
-                  className="w-full px-4 py-2.5 border border-[#c7c5d4] rounded-md focus:outline-none focus:ring-2 focus:ring-[#15157d] focus:border-transparent bg-white text-[#131b2e]"
-                  style={{ fontFamily: "Inter" }}
-                  placeholder="Acme Corp"
-                />
-              </div>
-            )}
-
             <div>
-              <label className="block text-sm font-medium text-[#131b2e] mb-1.5" style={{ fontFamily: "Inter" }}>
+              <label className="block text-sm font-medium text-[var(--fg)] mb-1.5" style={{ fontFamily: "Inter" }}>
                 Email
               </label>
               <input
@@ -122,14 +108,14 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 border border-[#c7c5d4] rounded-md focus:outline-none focus:ring-2 focus:ring-[#15157d] focus:border-transparent bg-white text-[#131b2e]"
+                className="w-full px-4 py-2.5 border border-[var(--border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent bg-[var(--panel)] text-[var(--fg)]"
                 style={{ fontFamily: "Inter" }}
                 placeholder="you@company.com"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-[#131b2e] mb-1.5" style={{ fontFamily: "Inter" }}>
+              <label className="block text-sm font-medium text-[var(--fg)] mb-1.5" style={{ fontFamily: "Inter" }}>
                 Password
               </label>
               <input
@@ -138,7 +124,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
-                className="w-full px-4 py-2.5 border border-[#c7c5d4] rounded-md focus:outline-none focus:ring-2 focus:ring-[#15157d] focus:border-transparent bg-white text-[#131b2e]"
+                className="w-full px-4 py-2.5 border border-[var(--border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent bg-[var(--panel)] text-[var(--fg)]"
                 style={{ fontFamily: "Inter" }}
                 placeholder="••••••••"
               />
@@ -150,7 +136,7 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="p-3 bg-[#ffdad6] border border-[#ba1a1a] rounded-md text-sm text-[#93000a]" style={{ fontFamily: "Inter" }}>
+              <div className="p-3 bg-red-500/10 border border-red-500/40 rounded-md text-sm text-red-300" style={{ fontFamily: "Inter" }}>
                 {error}
               </div>
             )}
@@ -158,10 +144,10 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-[#15157d] text-white rounded-md font-semibold hover:bg-[#2e3192] focus:outline-none focus:ring-2 focus:ring-[#15157d] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+              className="w-full py-3 px-4 bg-[var(--accent)] text-white rounded-md font-semibold hover:bg-[var(--accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
               style={{ fontFamily: "Inter" }}
             >
-              {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
+              {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create workspace"}
             </button>
           </form>
         </div>
