@@ -14,7 +14,16 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText} — ${text}`);
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = parsed.detail || parsed.message || text;
+    } catch {
+      if (text.includes("<html") || text.includes("<!DOCTYPE")) {
+        detail = "Public connection temporarily unavailable. Refresh page or retry in a moment.";
+      }
+    }
+    throw new Error(`${res.status} ${res.statusText}${detail ? ` — ${detail}` : ""}`);
   }
   return res.json();
 }

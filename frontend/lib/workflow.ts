@@ -59,6 +59,7 @@ export type BrowserFilterPlan = {
   keywords: string;
   current_title: string;
   function: string;
+  industries?: string[];
   geography: string;
   seniority?: string | null;
   notes: string[];
@@ -128,8 +129,10 @@ export const browserInput = (sessionId: string, body: { text?: string; key?: "Ba
   });
 export const getBrowserFilterPlan = (sessionId: string) =>
   apiFetch<BrowserFilterPlan>(`/browser-sessions/${sessionId}/filter-plan`);
+export const getBrowserSearchSummary = (sessionId: string) =>
+  apiFetch<{ current_url: string; result_count: string | null }>(`/browser-sessions/${sessionId}/search-summary`);
 export const applyBrowserFilters = (sessionId: string) =>
-  apiFetch<BrowserSession & { filter_plan: BrowserFilterPlan; applied: string[] }>(
+  apiFetch<BrowserSession & { filter_plan: BrowserFilterPlan; applied: string[]; warnings?: string[] }>(
     `/browser-sessions/${sessionId}/apply-filters`,
     { method: "POST", body: JSON.stringify({ confirmed: true }) },
   );

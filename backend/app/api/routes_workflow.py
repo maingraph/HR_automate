@@ -366,7 +366,12 @@ async def _agent_call(path: str, body: Optional[dict[str, Any]] = None) -> dict[
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(f"{settings.browser_agent_url}{path}", json=body or {}, headers=headers)
     if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"Browser agent: {response.text}")
+        try:
+            detail = response.json().get("detail") or "Browser control request failed"
+        except ValueError:
+            detail = "Browser control service is temporarily unavailable. Retry in a moment."
+        status = response.status_code if response.status_code in {400, 401, 404, 409} else 503
+        raise HTTPException(status_code=status, detail=f"Browser control: {detail}")
     return response.json()
 
 
@@ -383,18 +388,40 @@ def _browser_session_for_client(session: Optional[dict[str, Any]]) -> Optional[d
 
 def _job_filter_plan(job: dict[str, Any]) -> dict[str, Any]:
     title = (job.get("title") or "").lower()
-    if "backend" in title or "back end" in title:
+    current_title = job.get("title") or ""
+    industries: list[str] = []
+    if "media buyer" in title or "media buying" in title or "performance marketing" in title or "marketing" in title:
+        function = "Marketing"
+    elif "sales" in title or "business development" in title:
+        function = "Sales"
+    elif "designer" in title or "design" in title:
+        function = "Design"
+    elif "product" in title:
+        function = "Product Management"
+    elif "finance" in title or "accountant" in title:
+        function = "Finance"
+    elif "backend" in title or "back end" in title:
         current_title = "Back End Developer"
+        function = "Engineering"
     elif "frontend" in title or "front end" in title:
         current_title = "Frontend Developer"
+        function = "Engineering"
     elif "full stack" in title or "fullstack" in title:
         current_title = "Full Stack Engineer"
+        function = "Engineering"
     elif "devops" in title:
         current_title = "DevOps Engineer"
+        function = "Engineering"
     elif "data scientist" in title:
         current_title = "Data Scientist"
+        function = "Engineering"
     else:
-        current_title = job.get("title") or ""
+        function = ""
+
+    if any(term in title for term in ("igaming", "gambling", "casino", "betting")) or any(
+        term in str(skill).lower() for skill in (job.get("skills") or []) for term in ("igaming", "gambling", "casino", "betting")
+    ):
+        industries.append("Gambling Facilities and Casinos")
 
     geo = (job.get("geo") or "").lower()
     if "europe" in geo:
@@ -410,11 +437,13 @@ def _job_filter_plan(job: dict[str, Any]) -> dict[str, Any]:
             *((job.get("skills") or [])[:3]),
         ]).strip(),
         "current_title": current_title,
-        "function": "Engineering",
+        "function": function,
+        "industries": industries,
         "geography": geography,
         "seniority": None,
         "notes": [
-            "Remote is not a candidate-location filter; geography uses Europe.",
+            *( ["Remote is not a candidate-location filter; geography uses Europe."] if geography else ["No location filter inferred. Add geography manually only if needed."] ),
+            *( [f"Industry suggestion: {', '.join(industries)}."] if industries else [] ),
             "Sales Navigator has no reliable Senior individual-contributor option, so seniority stays in keywords.",
         ],
     }
@@ -554,6 +583,15 @@ async def get_browser_filter_plan(
     return _job_filter_plan(_job(session["job_id"], current))
 
 
+@router.get("/browser-sessions/{session_id}/search-summary")
+async def get_browser_search_summary(
+    session_id: str,
+    current: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    session = await get_browser_session(session_id, current)
+    return await _agent_call("/sessions/search-summary", {"session_id": session_id})
+
+
 @router.post("/browser-sessions/{session_id}/apply-filters")
 async def apply_browser_filters(
     session_id: str,
@@ -584,6 +622,7 @@ async def apply_browser_filters(
         **_browser_session_for_client(result.data[0]),
         "filter_plan": plan,
         "applied": agent.get("applied", []),
+        "warnings": agent.get("warnings", []),
     }
 
 

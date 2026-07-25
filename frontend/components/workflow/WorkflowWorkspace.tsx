@@ -5,7 +5,7 @@ import { useWebSocket } from "@/lib/hooks/useWebSocket";
 import {
   BrowserSession, CandidateDataset, CandidateRecord, StageRun, StageType,
   applyBrowserFilters, browserCommand, browserInput, controlStage, createBrowserSession, createStage, deleteRecord, downloadDataset,
-  getBrowserFilterPlan, getJobBrowserSession, getRecords, importDataset, listDatasets, listStages, patchRecord, previewImport, searchTelegramChannels, TelegramChannelResult,
+  getBrowserFilterPlan, getBrowserSearchSummary, getJobBrowserSession, getRecords, importDataset, listDatasets, listStages, patchRecord, previewImport, searchTelegramChannels, TelegramChannelResult,
 } from "@/lib/workflow";
 import { datasetStateLabel, stageStatusLabel } from "@/lib/pipeline-presentation";
 
@@ -120,12 +120,21 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
   const [inputText, setInputText] = useState("");
   const [privateInput, setPrivateInput] = useState(true);
   const [inputError, setInputError] = useState("");
+  const [filterNote, setFilterNote] = useState("");
   useEffect(() => { if (openRequested) { setOpen(true); onOpenHandled(); } }, [openRequested, onOpenHandled]);
   const command = async (action: "open-search" | "lock-search" | "take-control" | "release-control") => {
     if (!session) return;
-    setBusy(true); try { onSession(await browserCommand(session.id, action)); } finally { setBusy(false); }
+    setInputError("");
+    setBusy(true); try { onSession({ ...session, ...await browserCommand(session.id, action) }); } catch (error) { setInputError(error instanceof Error ? error.message : "Browser action failed"); } finally { setBusy(false); }
   };
-  const start = async () => { setBusy(true); try { onSession(await createBrowserSession(jobId)); } finally { setBusy(false); } };
+  const start = async () => {
+    setInputError(""); setBusy(true);
+    try {
+      const created = await createBrowserSession(jobId);
+      onSession({ ...created, ...await browserCommand(created.id, "open-search") });
+    } catch (error) { setInputError(error instanceof Error ? error.message : "Could not open Sales Navigator"); }
+    finally { setBusy(false); }
+  };
   const prepareFilters = async () => {
     if (!session) return;
     setBusy(true);
@@ -137,18 +146,44 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
         `Keywords: ${plan.keywords}`,
         `Current title: ${plan.current_title}`,
         `Function: ${plan.function}`,
+        `Industry: ${plan.industries?.join(", ") || "none inferred"}`,
         `Geography: ${plan.geography}`,
         `Seniority: ${plan.seniority || "kept in keywords"}`,
         "",
         ...plan.notes,
       ].join("\n"));
       if (!approved) return;
-      onSession(await applyBrowserFilters(session.id));
+      const result = await applyBrowserFilters(session.id);
+      onSession({ ...session, ...result });
+      setFilterNote(result.warnings?.length ? result.warnings.join(" · ") : `Applied: ${result.applied.join(", ") || "no automatic filters"}`);
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "Filter application failed");
     } finally {
       setBusy(false);
     }
+  };
+  const refineSearch = async () => {
+    if (!session) return;
+    setInputError(""); setBusy(true);
+    try {
+      const [summary, plan] = await Promise.all([getBrowserSearchSummary(session.id), getBrowserFilterPlan(session.id)]);
+      const proceed = confirm([
+        `Current Sales Navigator results: ${summary.result_count || "not detected"}.`,
+        "",
+        "Refine using job-derived filters?",
+        `Title: ${plan.current_title}`,
+        `Function: ${plan.function || "keep manual"}`,
+        `Industry: ${plan.industries?.join(", ") || "none inferred"}`,
+        `Geography: ${plan.geography || "keep manual"}`,
+        "",
+        "If count is still too large after this, add geography, seniority, or company constraints directly in Sales Navigator, then lock search.",
+      ].join("\n"));
+      if (!proceed) return;
+      const result = await applyBrowserFilters(session.id);
+      onSession({ ...session, ...result });
+      setFilterNote(result.warnings?.length ? result.warnings.join(" · ") : `Refined ${summary.result_count || "current"} results: ${result.applied.join(", ") || "filters already present"}`);
+    } catch (error) { setInputError(error instanceof Error ? error.message : "Could not refine search"); }
+    finally { setBusy(false); }
   };
   const sendInput = async (body: { text?: string; key?: "Backspace" | "Delete" | "Tab" | "Enter" | "Escape" | "Control+A" }) => {
     if (!session) return;
@@ -166,11 +201,12 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
   const visible = open || session?.state === "awaiting_auth";
   return <div id="browser-workspace" className={`${expanded ? "relative z-10 -mx-3 md:-mx-6 shadow-xl" : ""} rounded-xl border border-[var(--border)] bg-[var(--panel)] overflow-hidden`}>
     <div className="p-4 flex flex-wrap items-center gap-2 border-b border-[var(--border)]"><div className="flex-1"><div className="font-medium text-[var(--fg)]">Interactive Sales Navigator</div><div className="text-xs text-[var(--muted)]">{session?.state || "Browser stopped"}{session?.current_url ? ` · ${session.current_url}` : ""}</div></div>
-      {!session && <button disabled={busy} onClick={start} className="btn-primary text-xs px-3 py-1.5">Start browser</button>}
+      {!session && <button disabled={busy} onClick={start} className="btn-primary text-xs px-3 py-1.5">Open Sales Navigator search</button>}
       {session && <button onClick={() => setOpen(value => !value)} className="btn-secondary text-xs px-3 py-1.5">{visible ? "Hide browser" : "Open Sales Navigator"}</button>}
-      {session && visible && <><button disabled={busy} onClick={() => command("open-search")} className="btn-secondary text-xs px-3 py-1.5">Open AI search</button><button disabled={busy} onClick={prepareFilters} className="btn-secondary text-xs px-3 py-1.5">Apply job filters</button><button disabled={busy} onClick={() => command("lock-search")} className="btn-primary text-xs px-3 py-1.5">Lock search</button><button disabled={busy} onClick={() => command("take-control")} className="btn-secondary text-xs px-3 py-1.5">Take control</button><button disabled={busy} onClick={() => command("release-control")} className="btn-secondary text-xs px-3 py-1.5">Release</button><button onClick={() => setExpanded(value => !value)} className="btn-secondary text-xs px-3 py-1.5">{expanded ? "Normal size" : "Larger browser"}</button></>}
+      {session && visible && <><button disabled={busy} onClick={() => command("open-search")} className="btn-secondary text-xs px-3 py-1.5">1. Reset search</button><button disabled={busy} onClick={prepareFilters} className="btn-secondary text-xs px-3 py-1.5">2. Apply suggested filters</button><button disabled={busy} onClick={refineSearch} className="btn-secondary text-xs px-3 py-1.5">Refine if results too large</button><button disabled={busy} onClick={() => command("lock-search")} className="btn-primary text-xs px-3 py-1.5">3. Lock reviewed search</button><button disabled={busy} onClick={() => command("take-control")} className="btn-secondary text-xs px-3 py-1.5">Take control</button><button disabled={busy} onClick={() => command("release-control")} className="btn-secondary text-xs px-3 py-1.5">Release</button><button onClick={() => setExpanded(value => !value)} className="btn-secondary text-xs px-3 py-1.5">{expanded ? "Normal size" : "Larger browser"}</button></>}
     </div>
     {visible && session?.state === "awaiting_auth" && <div className="p-3 bg-orange-500/10 text-orange-300 border-b border-orange-500/30">LinkedIn needs login or mobile approval. Complete it in browser, then lock search.</div>}
+    {visible && session && <div className="grid md:grid-cols-4 gap-2 p-3 border-b border-[var(--border)] bg-[var(--surface)] text-xs"><div className="rounded border border-[var(--accent)]/40 p-2"><b>1. Search</b><br /><span className="text-[var(--muted)]">Opened from job title and skills.</span></div><div className="rounded border border-[var(--border)] p-2"><b>2. Filters</b><br /><span className="text-[var(--muted)]">Apply suggestions, then edit inside SalesNav.</span></div><div className="rounded border border-[var(--border)] p-2"><b>3. Review</b><br /><span className="text-[var(--muted)]">Check results, title, geography, exclusions.</span></div><div className="rounded border border-[var(--border)] p-2"><b>4. Lock & extract</b><br /><span className="text-[var(--muted)]">Lock exact search, then start bounded extraction.</span></div></div>}
     {visible && session && <div className="p-3 border-b border-[var(--border)] bg-[var(--surface)]">
       <div className="text-xs text-[var(--muted)] mb-2">Click a field inside Sales Navigator, then type or paste here. Text is sent directly to Chromium and never stored.</div>
       <div className="flex flex-wrap items-center gap-2">
@@ -193,6 +229,7 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
         ))}
       </div>
       {inputError && <div className="text-xs text-red-400 mt-2">{inputError}</div>}
+      {filterNote && <div className="text-xs text-[var(--muted)] mt-2">{filterNote}</div>}
     </div>}
     {visible && (session?.viewer_url ? <iframe title="Sales Navigator browser" src={session.viewer_url} className={`w-full bg-black ${expanded ? "h-[800px]" : "h-[700px]"}`} allow="clipboard-read; clipboard-write" /> : <div className="h-48 grid place-items-center text-[var(--muted)]">Start browser to open embedded noVNC viewer.</div>)}
   </div>;

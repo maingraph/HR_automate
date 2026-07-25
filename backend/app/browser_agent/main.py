@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -188,6 +189,20 @@ async def inspect_filter_options(payload: SessionPayload) -> dict[str, Any]:
     return {"current_url": page.url, "controls": controls}
 
 
+@app.post("/sessions/search-summary", dependencies=[Depends(authorize)])
+async def search_summary(payload: SessionPayload) -> dict[str, Any]:
+    """Read visible result count without issuing another LinkedIn search."""
+    session = _session(payload.session_id)
+    if "/sales/search/people" not in session.page.url:
+        raise HTTPException(status_code=409, detail="Open a Sales Navigator people search first")
+    text = await session.page.locator("body").inner_text()
+    match = re.search(r"(\d[\d,.]*\+?)\s+results", text, flags=re.IGNORECASE)
+    return {
+        "current_url": session.page.url,
+        "result_count": match.group(1) if match else None,
+    }
+
+
 async def _expand_filter(page: Page, name: str) -> None:
     expand = page.get_by_role("button", name=f"Expand {name} filter", exact=True)
     collapse = page.get_by_role("button", name=f"Collapse {name} filter", exact=True)
@@ -249,10 +264,17 @@ async def apply_filters(payload: SessionPayload) -> dict[str, Any]:
         }
     plan = payload.cursor or {}
     applied: list[str] = []
+    warnings: list[str] = []
+
+    async def optional(step: str, action) -> None:
+        try:
+            applied.append(await action)
+        except HTTPException as exc:
+            warnings.append(f"{step} not applied: {exc.detail}")
 
     title = str(plan.get("current_title") or "").strip()
     if title:
-        applied.append(await _include_typeahead(
+        await optional("Current job title", _include_typeahead(
             page,
             filter_name="Current job title",
             selected_filter_name="Current job title",
@@ -275,13 +297,30 @@ async def apply_filters(payload: SessionPayload) -> dict[str, Any]:
                 f'button[aria-label^="Add {function_name} "]'
             )
             if await add_function.count() == 1:
-                await add_function.click()
-                await page.wait_for_timeout(700)
-                applied.append(function_name)
+                try:
+                    await add_function.click()
+                    await page.wait_for_timeout(700)
+                    applied.append(function_name)
+                except Exception as exc:
+                    warnings.append(f"Function not applied: {exc}")
+            else:
+                warnings.append(f"Function not applied: {function_name} is unavailable in this Sales Navigator view")
+
+    for industry in plan.get("industries") or []:
+        industry_name = str(industry).strip()
+        if industry_name:
+            await optional("Industry", _include_typeahead(
+                page,
+                filter_name="Industry",
+                selected_filter_name="Industry",
+                placeholder="Search industries",
+                query=industry_name,
+                expected_prefix=industry_name,
+            ))
 
     geography = str(plan.get("geography") or "").strip()
     if geography:
-        applied.append(await _include_typeahead(
+        await optional("Geography", _include_typeahead(
             page,
             filter_name="Geography",
             selected_filter_name="Region",
@@ -295,6 +334,7 @@ async def apply_filters(payload: SessionPayload) -> dict[str, Any]:
         "state": "manual_control",
         "current_url": page.url,
         "applied": applied,
+        "warnings": warnings,
         "awaiting_auth": False,
     }
 
