@@ -89,17 +89,17 @@ async def login(payload: LoginRequest) -> TokenResponse:
         sb.table("users")
         .select("id, email, password_hash, org_id, role, orgs(name)")
         .eq("email", payload.email)
-        .single()
+        .maybe_single()
         .execute()
     )
 
-    if not result.data:
+    user = result.data if result else None
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
-    user = result.data
     if not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
