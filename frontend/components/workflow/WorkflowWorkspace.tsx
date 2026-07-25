@@ -356,7 +356,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     guide = { title: "LinkedIn approval required", detail: "Complete challenge in embedded browser, then press Auth complete on Sales Navigator card.", action: "browser", label: "Go to browser" };
   } else if (sourceRun?.status === "awaiting_user") {
     const sourceLabel = CATALOG.find(item => item.type === sourceRun.stage_type)?.label || "source";
-    guide = { title: `Review ${sourceLabel} candidates`, detail: "Open output dataset, inspect/edit/export. When satisfied, use Seal & continue on this source card.", action: "review", label: "Open source dataset" };
+    guide = { title: `Review ${sourceLabel} candidates`, detail: "Open output dataset, inspect/edit/export. When satisfied, use Seal & continue on this source card.", action: "review", label: "Open source dataset", stage: sourceRun.stage_type };
   } else if (sourceRun && ["failed", "stopped"].includes(sourceRun.status)) {
     const canRerun = sourceRun.stage_type !== "telegram_extract" || Array.isArray(sourceRun.config.channels) && sourceRun.config.channels.length > 0;
     guide = canRerun
