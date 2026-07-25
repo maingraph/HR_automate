@@ -33,6 +33,13 @@ def utcnow() -> str:
 
 
 def candidate_key(payload: dict[str, Any]) -> str:
+    # A Telegram post can lack a named profile and contact details. In that
+    # case it is still an independent source record, keyed by channel:message.
+    # Without this branch every anonymous post hashes to the same empty identity.
+    if not any(payload.get(field) for field in ("linkedin_url", "username", "telegram_url", "email", "full_name")):
+        source_id = str(payload.get("source_id") or "").strip()
+        if source_id:
+            return hashlib.sha256(f"source:{source_id}".encode()).hexdigest()
     key = dedup_key(
         linkedin_url=payload.get("linkedin_url"),
         telegram_username=payload.get("username") or payload.get("telegram_url"),
@@ -109,18 +116,33 @@ def append_records(
     dataset = get_dataset(dataset_id, org_id)
     if not dataset or dataset["state"] not in ("draft", "partial"):
         raise ValueError("Dataset is not editable")
-    rows = []
+    rows_by_key: dict[str, dict[str, Any]] = {}
     for offset, payload in enumerate(payloads):
         source_payload = payload.get("raw") if isinstance(payload.get("raw"), dict) else {}
-        rows.append({
+        key = candidate_key(payload)
+        row = {
             "org_id": org_id,
             "dataset_id": dataset_id,
-            "candidate_key": candidate_key(payload),
+            "candidate_key": key,
             "payload": payload,
             "source_payload": source_payload,
             "included": bool(payload.get("included", True)),
             "position": start_position + offset,
-        })
+        }
+        # PostgREST rejects duplicate keys inside one upsert request. Preserve
+        # one candidate row and enrich empty fields from repeated source posts.
+        existing = rows_by_key.get(key)
+        if existing:
+            existing_payload = existing["payload"]
+            for field, value in payload.items():
+                if value and not existing_payload.get(field):
+                    existing_payload[field] = value
+            duplicate_sources = existing_payload.setdefault("raw", {}).setdefault("duplicate_source_ids", [])
+            if payload.get("source_id") and payload["source_id"] not in duplicate_sources:
+                duplicate_sources.append(payload["source_id"])
+            continue
+        rows_by_key[key] = row
+    rows = list(rows_by_key.values())
     sb = get_supabase()
     for index in range(0, len(rows), 250):
         sb.table("candidate_records").upsert(

@@ -33,6 +33,7 @@ function StageCard({ definition, run, selectedInputs, onRun, onControl, onSelect
   onSelectOutput: () => void;
 }) {
   const active = run && ["pending", "running", "pause_requested", "paused", "awaiting_auth"].includes(run.status);
+  const rerunnable = definition.type !== "telegram_extract" || Array.isArray(run?.config?.channels) && run!.config.channels.length > 0;
   const pct = run?.progress?.percentage || 0;
   return (
     <div className={`rounded-xl border bg-[var(--panel)] p-4 ${run ? STATUS_COLORS[run.status] || "border-[var(--border)]" : "border-[var(--border)]"}`}>
@@ -52,13 +53,13 @@ function StageCard({ definition, run, selectedInputs, onRun, onControl, onSelect
       )}
       {run?.error && <div className="mt-2 text-xs text-red-400 line-clamp-2">{run.error}</div>}
       <div className="flex flex-wrap gap-2 mt-4">
-        {!active && run?.status !== "awaiting_user" && <button onClick={onRun} disabled={!definition.source && selectedInputs.length === 0} className="btn-primary text-xs px-3 py-1.5 disabled:opacity-40">{run ? "New run" : "Start"}</button>}
+        {!active && run?.status !== "awaiting_user" && <button onClick={onRun} disabled={!definition.source && selectedInputs.length === 0} className="btn-primary text-xs px-3 py-1.5 disabled:opacity-40">{run ? definition.type === "telegram_extract" ? "New configured run" : "New run" : "Start"}</button>}
         {run?.status === "running" && <button onClick={() => onControl("pause")} className="btn-secondary text-xs px-3 py-1.5">Pause</button>}
         {run?.status === "paused" && <button onClick={() => onControl("resume")} className="btn-primary text-xs px-3 py-1.5">Resume</button>}
         {run?.status === "awaiting_auth" && <button onClick={() => onControl("resume")} className="btn-primary text-xs px-3 py-1.5">Auth complete</button>}
         {active && <button onClick={() => onControl("stop")} className="text-xs px-3 py-1.5 rounded border border-red-500/50 text-red-400">Stop now</button>}
         {run?.status === "awaiting_user" && <button onClick={() => onControl("continue")} className="btn-primary text-xs px-3 py-1.5">Seal & continue</button>}
-        {run && ["completed", "failed", "stopped", "skipped"].includes(run.status) && <button onClick={() => onControl("rerun")} className="btn-secondary text-xs px-3 py-1.5">Rerun</button>}
+        {run && rerunnable && ["completed", "failed", "stopped", "skipped"].includes(run.status) && <button onClick={() => onControl("rerun")} className="btn-secondary text-xs px-3 py-1.5">Rerun same setup</button>}
         {!run && !definition.source && <span className="text-[10px] text-[var(--muted)] self-center">{selectedInputs.length} input(s)</span>}
       </div>
     </div>
@@ -201,6 +202,8 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const [salesnavLimit, setSalesnavLimit] = useState(3);
   const [telegramChannels, setTelegramChannels] = useState("");
   const [telegramKeywords, setTelegramKeywords] = useState("");
+  const [telegramDays, setTelegramDays] = useState(30);
+  const [telegramLimit, setTelegramLimit] = useState(100);
   const [telegramQuery, setTelegramQuery] = useState("");
   const [telegramMatches, setTelegramMatches] = useState<TelegramChannelResult[]>([]);
   const [telegramSearching, setTelegramSearching] = useState(false);
@@ -244,6 +247,11 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const activeStages = activePipeline?.runs || [];
   const latest = useMemo(() => Object.fromEntries(CATALOG.map(item => [item.type, activeStages.filter(s => s.stage_type === item.type).at(-1)])), [activeStages]);
   useEffect(() => { if (activePipeline && activePipelineId !== activePipeline.id) setActivePipelineId(activePipeline.id); }, [activePipeline, activePipelineId]);
+  useEffect(() => {
+    const outputId = activePipeline?.runs.at(-1)?.output_dataset_id;
+    const output = datasets.find(dataset => dataset.id === outputId);
+    if (output) setSelectedDataset(output);
+  }, [activePipeline?.id, datasets]);
   const run = async (type: StageType) => {
     if (type === "file_import") { fileRef.current?.click(); return; }
     const config: Record<string, unknown> = {};
@@ -262,6 +270,8 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
       if (!channels.length) throw new Error("Add at least one Telegram channel (for example @pythonjobs) before starting Telegram extraction");
       config.channels = channels;
       config.keywords = telegramKeywords.split(",").map(value => value.trim()).filter(Boolean);
+      config.days_back = Math.max(1, Math.min(365, telegramDays));
+      config.per_channel_limit = Math.max(10, Math.min(1000, telegramLimit));
     }
     const stage = await createStage(jobId, { stage_type: type, input_dataset_ids: CATALOG.find(v => v.type === type)?.source ? [] : selectedInputs, config });
     if (CATALOG.find(v => v.type === type)?.source) setActivePipelineId(`root:${stage.id}`);
@@ -283,6 +293,8 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     const current = telegramChannels.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
     if (!current.includes(handle)) setTelegramChannels([...current, handle].join(", "));
   };
+  const removeTelegramChannel = (handle: string) => setTelegramChannels(current => current.split(/[\s,]+/).map(value => value.trim()).filter(value => value && value !== handle).join(", "));
+  const selectedTelegramChannels = telegramChannels.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
   const rootRun = activePipeline?.root;
   const rootType = rootRun?.stage_type;
   const sourceRun = rootRun;
@@ -343,9 +355,13 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   } else if (rootType === "salesnav_extract" && sourceRun?.status === "awaiting_auth") {
     guide = { title: "LinkedIn approval required", detail: "Complete challenge in embedded browser, then press Auth complete on Sales Navigator card.", action: "browser", label: "Go to browser" };
   } else if (sourceRun?.status === "awaiting_user") {
-    guide = { title: "Review collected candidates", detail: "Open output dataset, inspect/edit/export. When satisfied, use Seal & continue on Sales Navigator card.", action: "review", label: "Open source dataset" };
+    const sourceLabel = CATALOG.find(item => item.type === sourceRun.stage_type)?.label || "source";
+    guide = { title: `Review ${sourceLabel} candidates`, detail: "Open output dataset, inspect/edit/export. When satisfied, use Seal & continue on this source card.", action: "review", label: "Open source dataset" };
   } else if (sourceRun && ["failed", "stopped"].includes(sourceRun.status)) {
-    guide = { title: "Source run needs retry", detail: sourceRun.error || "Previous run stopped. Existing flushed rows remain available.", action: "rerun", label: "Rerun source" };
+    const canRerun = sourceRun.stage_type !== "telegram_extract" || Array.isArray(sourceRun.config.channels) && sourceRun.config.channels.length > 0;
+    guide = canRerun
+      ? { title: "Source run needs retry", detail: sourceRun.error || "Previous run stopped. Existing flushed rows remain available.", action: "rerun", label: "Rerun same setup" }
+      : { title: "Telegram source needs setup", detail: "Choose channels, then start a new configured Telegram run.", action: "telegram-setup", label: "Configure Telegram" };
   } else {
     const downstream: StageType[] = ["merge_dedup", "profile_enrich", "rules_filter", "similarity_analyze", "ai_grade"];
     const nextType = downstream.find(type => {
@@ -378,6 +394,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     const guideRun = guide.stage ? latest[guide.stage] : undefined;
     if (guide.action === "browser") document.getElementById("browser-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "pipelines") document.getElementById("pipeline-selector")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (guide.action === "telegram-setup") document.getElementById("telegram-setup")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "datasets") document.getElementById("datasets-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "run" && guide.stage) await run(guide.stage);
     if (guide.action === "resume" && guideRun) await control(guideRun, "resume");
@@ -408,7 +425,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     </div>
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h2 className="font-semibold text-[var(--fg)]">Stage workspace · {activePipeline?.label || "choose pipeline"}</h2><p className="text-xs text-[var(--muted)]">Pipeline lanes stay separate. Every output pauses for review.</p></div><div className="flex items-center gap-2"><label className="text-xs text-[var(--muted)]">SalesNav profiles <input type="number" min={1} max={200} value={salesnavLimit} onChange={event => setSalesnavLimit(Math.max(1, Math.min(200, Number(event.target.value) || 1)))} className="input ml-1 w-20 text-sm" /></label><button onClick={() => fileRef.current?.click()} className="btn-secondary text-xs px-3 py-1.5">Import dataset</button></div></div>
       <input ref={fileRef} className="hidden" type="file" accept=".xlsx,.xls,.csv,.json" onChange={e => e.target.files?.[0] && upload(e.target.files[0]).catch(err => setError(err.message))} />
-      <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3"><div className="text-sm font-medium text-[var(--fg)]">Telegram source setup</div><div className="text-xs text-[var(--muted)] mt-1">Search public channels, add chosen handles, then start Telegram source run.</div><div className="flex gap-2 mt-3"><input value={telegramQuery} onChange={event => setTelegramQuery(event.target.value)} onKeyDown={event => event.key === "Enter" && findTelegramChannels()} placeholder="Search Telegram channels, e.g. python jobs" className="input text-sm flex-1" /><button disabled={telegramSearching || telegramQuery.trim().length < 2} onClick={() => findTelegramChannels()} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">{telegramSearching ? "Searching…" : "Find channels"}</button></div>{telegramMatches.length > 0 && <div className="flex flex-wrap gap-2 mt-3">{telegramMatches.map(match => <button key={match.handle} onClick={() => addTelegramChannel(match.handle)} className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--accent)]"><span className="text-[var(--fg)]">{match.title}</span><span className="text-[var(--muted)]"> · {match.handle} · {match.kind}</span></button>)}</div>}<div className="grid md:grid-cols-2 gap-2 mt-3"><input value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="Chosen channels: @channel_one, @channel_two" className="input text-sm" /><input value={telegramKeywords} onChange={event => setTelegramKeywords(event.target.value)} placeholder="Optional candidate keywords, comma-separated" className="input text-sm" /></div></div>
+      <div id="telegram-setup" className="mb-4 rounded-lg border border-[var(--accent)]/40 bg-[var(--panel)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-sm font-medium text-[var(--fg)]">Start Telegram extraction</div><div className="text-xs text-[var(--muted)] mt-1">1. Search channels. 2. Click <b>+ Add</b>. 3. Start bounded scan.</div></div><button disabled={selectedTelegramChannels.length === 0} onClick={() => run("telegram_extract").catch(nextError => setError(nextError.message))} className="btn-primary text-sm px-4 py-2 disabled:opacity-40">Start Telegram scan · {selectedTelegramChannels.length} channel{selectedTelegramChannels.length === 1 ? "" : "s"}</button></div><div className="flex gap-2 mt-3"><input value={telegramQuery} onChange={event => setTelegramQuery(event.target.value)} onKeyDown={event => event.key === "Enter" && findTelegramChannels()} placeholder="Search Telegram channels, e.g. python jobs" className="input text-sm flex-1" /><button disabled={telegramSearching || telegramQuery.trim().length < 2} onClick={() => findTelegramChannels()} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">{telegramSearching ? "Searching…" : "Find channels"}</button></div>{telegramMatches.length > 0 && <div className="mt-3"><div className="text-xs text-[var(--muted)] mb-2">Search results — click + Add</div><div className="flex flex-wrap gap-2">{telegramMatches.map(match => <button key={match.handle} onClick={() => addTelegramChannel(match.handle)} className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--accent)]"><span className="text-[var(--accent)]">+ Add</span><span className="text-[var(--fg)]"> · {match.title}</span><span className="text-[var(--muted)]"> · {match.handle}</span></button>)}</div></div>}<div className="mt-3"><div className="text-xs text-[var(--muted)] mb-2">Chosen channels</div>{selectedTelegramChannels.length ? <div className="flex flex-wrap gap-2">{selectedTelegramChannels.map(handle => <button key={handle} onClick={() => removeTelegramChannel(handle)} className="rounded bg-[var(--accent)]/10 border border-[var(--accent)]/40 px-2 py-1 text-xs text-[var(--fg)]">{handle} ×</button>)}</div> : <div className="text-xs text-[var(--muted)]">None yet — add one or more search results.</div>}</div><div className="grid md:grid-cols-4 gap-2 mt-3"><input value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="Or paste @channel handles" className="input text-sm md:col-span-2" /><input value={telegramKeywords} onChange={event => setTelegramKeywords(event.target.value)} placeholder="Candidate keywords" className="input text-sm" /><label className="text-xs text-[var(--muted)] flex items-center gap-2">Last <input type="number" min={1} max={365} value={telegramDays} onChange={event => setTelegramDays(Number(event.target.value) || 30)} className="input w-16 text-sm" /> days</label><label className="text-xs text-[var(--muted)] flex items-center gap-2">Max/channel <input type="number" min={10} max={1000} value={telegramLimit} onChange={event => setTelegramLimit(Number(event.target.value) || 100)} className="input w-16 text-sm" /></label></div></div>
       <div className="space-y-5">{[["1 · Sources", CATALOG.filter(def => def.phase === 1)], ["2 · Assemble", CATALOG.filter(def => def.phase === 2)], ["3–6 · Improve and rank", CATALOG.filter(def => def.phase >= 3)]].map(([title, definitions]) => <section key={String(title)}><div className="text-xs uppercase tracking-widest text-[var(--muted)] mb-2">{String(title)}</div><div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">{(definitions as typeof CATALOG).map(def => <StageCard key={def.type} definition={def} run={latest[def.type]} selectedInputs={selectedInputs} onRun={() => run(def.type).catch(e => setError(e.message))} onControl={action => latest[def.type] && control(latest[def.type]!, action).catch(e => setError(e.message))} onSelectOutput={() => { const id = latest[def.type]?.output_dataset_id; setSelectedDataset(datasets.find(d => d.id === id) || null); }} />)}</div></section>)}</div>
     </div>
     <div id="datasets-workspace" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="font-medium text-[var(--fg)] mb-1">Available datasets</div><div className="text-xs text-[var(--muted)] mb-3">Run groups. Current pipeline first. Check datasets only within selected pipeline.</div><div className="space-y-5">{pipelines.map(pipeline => { const pipelineDatasetIds = new Set(pipeline.runs.map(stage => stage.output_dataset_id).filter(Boolean)); const groupedDatasets = datasets.filter(dataset => pipelineDatasetIds.has(dataset.id)); if (!groupedDatasets.length) return null; return <section key={pipeline.id} className={`rounded-lg border p-3 ${activePipeline?.id === pipeline.id ? "border-[var(--accent)]/50" : "border-[var(--border)]"}`}><div className="flex items-center justify-between gap-3 mb-2"><button onClick={() => { setActivePipelineId(pipeline.id); setSelectedInputs([]); }} className="text-left"><div className="text-sm font-medium text-[var(--fg)]">{pipeline.label}</div><div className="text-xs text-[var(--muted)]">Started {formatTime(pipeline.createdAt)} · {pipeline.runs.length} stage run(s)</div></button>{activePipeline?.id === pipeline.id && <span className="text-[10px] text-[var(--accent)] uppercase">Selected pipeline</span>}</div><div className="space-y-2">{groupedDatasets.map(dataset => { const stage = runForDataset.get(dataset.id); return <div key={dataset.id} className={`rounded border p-2 ${selectedInputs.includes(dataset.id) ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)]"}`}><div className="flex flex-wrap items-center gap-x-3 gap-y-2"><label className="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" disabled={activePipeline?.id !== pipeline.id} checked={selectedInputs.includes(dataset.id)} onChange={e => setSelectedInputs(e.target.checked ? [...selectedInputs, dataset.id] : selectedInputs.filter(id => id !== dataset.id))} /><span className="font-medium text-[var(--fg)]">{CATALOG.find(item => item.type === stage?.stage_type)?.label || dataset.kind} · run {stage?.attempt || 1}</span></label><span className="text-xs text-[var(--muted)]">{formatTime(stage?.created_at || dataset.created_at)}{duration(stage) ? ` · ${duration(stage)}` : ""} · {dataset.row_count} rows · {dataset.state}</span><button type="button" onClick={() => setSelectedDataset(dataset)} className="ml-auto text-xs text-[var(--accent)] hover:underline">Preview</button></div><div className="text-[11px] text-[var(--muted)] mt-1">{dataset.name} · {dataset.kind} · v{dataset.id.slice(0, 8)}</div></div>; })}</div></section>; })}</div></div>
