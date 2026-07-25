@@ -112,13 +112,14 @@ function DatasetGate({ dataset, onChanged }: { dataset: CandidateDataset; onChan
   );
 }
 
-function BrowserPanel({ jobId, session, onSession }: { jobId: string; session: BrowserSession | null; onSession: (s: BrowserSession) => void }) {
+function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled }: { jobId: string; session: BrowserSession | null; onSession: (s: BrowserSession) => void; openRequested: boolean; onOpenHandled: () => void }) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [inputText, setInputText] = useState("");
   const [privateInput, setPrivateInput] = useState(true);
   const [inputError, setInputError] = useState("");
+  useEffect(() => { if (openRequested) { setOpen(true); onOpenHandled(); } }, [openRequested, onOpenHandled]);
   const command = async (action: "open-search" | "lock-search" | "take-control" | "release-control") => {
     if (!session) return;
     setBusy(true); try { onSession(await browserCommand(session.id, action)); } finally { setBusy(false); }
@@ -208,6 +209,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   const [telegramDays, setTelegramDays] = useState(30);
   const [telegramLimit, setTelegramLimit] = useState(100);
   const [showTelegramTools, setShowTelegramTools] = useState(false);
+  const [browserRequested, setBrowserRequested] = useState(false);
   const [telegramQuery, setTelegramQuery] = useState("");
   const [telegramMatches, setTelegramMatches] = useState<TelegramChannelResult[]>([]);
   const [telegramSearching, setTelegramSearching] = useState(false);
@@ -396,7 +398,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
   }
   const executeGuide = async () => {
     const guideRun = guide.stage ? latest[guide.stage] : undefined;
-    if (guide.action === "browser") document.getElementById("browser-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (guide.action === "browser") { setBrowserRequested(true); document.getElementById("browser-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
     if (guide.action === "pipelines") document.getElementById("pipeline-selector")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "telegram-setup") document.getElementById("telegram-setup")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (guide.action === "datasets") document.getElementById("datasets-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -410,8 +412,14 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
     if (guide.action === "source-only") { useOnlySource(); document.getElementById("datasets-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
     if (guide.action === "skip-enrich") await skipEnrichment();
   };
+  const startSource = async (type: StageType) => {
+    if (type === "telegram_extract") { setShowTelegramTools(true); document.getElementById("telegram-setup")?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (type === "salesnav_extract") { setBrowserRequested(true); document.getElementById("browser-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    await run(type);
+  };
   return <div className="space-y-5">
     {error && <div className="p-3 rounded border border-red-500/40 bg-red-500/10 text-red-300">{error}</div>}
+    <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--panel)] p-4"><div className="text-[10px] uppercase tracking-widest text-[var(--accent)]">Start a new pipeline</div><div className="text-sm text-[var(--muted)] mt-1">Choose source first. This creates a separate pipeline; rerun is only for repeating old setup.</div><div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">{CATALOG.filter(definition => definition.source).map(definition => <button key={definition.type} onClick={() => startSource(definition.type).catch(nextError => setError(nextError.message))} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-left hover:border-[var(--accent)]"><span className="material-symbols-outlined text-[18px] text-[var(--accent)] align-middle mr-2">{definition.icon}</span><span className="text-sm font-medium text-[var(--fg)]">{definition.label}</span><div className="text-[11px] text-[var(--muted)] mt-1">{definition.type === "salesnav_extract" ? "Open search setup" : definition.type === "telegram_extract" ? "Find channels" : definition.type === "file_import" ? "Upload data" : "Start source"}</div></button>)}</div></div>
     <div id="pipeline-selector" className="rounded-xl border border-[var(--accent)]/40 bg-[var(--panel)] p-4">
       <div className="flex flex-wrap items-end gap-3"><div className="flex-1 min-w-64"><div className="text-[10px] uppercase tracking-widest text-[var(--accent)]">Active pipeline</div><label className="sr-only" htmlFor="pipeline-select">Choose pipeline</label><select id="pipeline-select" value={activePipeline?.id || ""} onChange={event => { setActivePipelineId(event.target.value); setSelectedInputs([]); }} className="input w-full mt-2 text-sm">{pipelines.map(pipeline => <option key={pipeline.id} value={pipeline.id}>{pipeline.label} · {formatTime(pipeline.createdAt)} · {pipeline.runs.at(-1)?.status || "pending"}</option>)}</select></div><div className="text-xs text-[var(--muted)] pb-2">{activePipeline?.runs.length || 0} run(s) · changes scope below</div></div>
     </div>
@@ -425,7 +433,7 @@ export function WorkflowWorkspace({ jobId }: { jobId: string }) {
         {phaseSteps.map((step, index) => <div key={step.label} className={`rounded-lg border px-3 py-2 text-xs ${step.status === "done" ? "border-green-500/40 bg-green-500/10 text-green-300" : step.status === "current" ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--fg)]" : "border-[var(--border)] text-[var(--muted)]"}`}><span className="mr-1">{step.status === "done" ? "✓" : index + 1}.</span>{step.label}</div>)}
       </div>
     </div>
-    <BrowserPanel jobId={jobId} session={browser} onSession={setBrowser} />
+    <BrowserPanel jobId={jobId} session={browser} onSession={setBrowser} openRequested={browserRequested} onOpenHandled={() => setBrowserRequested(false)} />
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h2 className="font-semibold text-[var(--fg)]">Stage workspace · {activePipeline?.label || "choose pipeline"}</h2><p className="text-xs text-[var(--muted)]">Pipeline lanes stay separate. Every output pauses for review.</p></div><div className="flex items-center gap-2"><label className="text-xs text-[var(--muted)]">SalesNav profiles <input type="number" min={1} max={200} value={salesnavLimit} onChange={event => setSalesnavLimit(Math.max(1, Math.min(200, Number(event.target.value) || 1)))} className="input ml-1 w-20 text-sm" /></label><button onClick={() => fileRef.current?.click()} className="btn-secondary text-xs px-3 py-1.5">Import dataset</button></div></div>
       <input ref={fileRef} className="hidden" type="file" accept=".xlsx,.xls,.csv,.json" onChange={e => e.target.files?.[0] && upload(e.target.files[0]).catch(err => setError(err.message))} />
       <div id="telegram-setup" className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3"><button onClick={() => setShowTelegramTools(value => !value)} className="w-full flex items-center justify-between text-left"><span><span className="font-medium text-[var(--fg)]">Telegram source tools</span><span className="text-xs text-[var(--muted)] ml-2">Search channels and start a new Telegram pipeline</span></span><span className="text-[var(--accent)] text-xs">{showTelegramTools ? "Hide" : "Open"}</span></button>{showTelegramTools && <div className="mt-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-sm font-medium text-[var(--fg)]">Start Telegram extraction</div><div className="text-xs text-[var(--muted)] mt-1">1. Search channels. 2. Click <b>+ Add</b>. 3. Start bounded scan.</div></div><button disabled={selectedTelegramChannels.length === 0} onClick={() => run("telegram_extract").catch(nextError => setError(nextError.message))} className="btn-primary text-sm px-4 py-2 disabled:opacity-40">Start Telegram scan · {selectedTelegramChannels.length} channel{selectedTelegramChannels.length === 1 ? "" : "s"}</button></div><div className="flex gap-2 mt-3"><input value={telegramQuery} onChange={event => setTelegramQuery(event.target.value)} onKeyDown={event => event.key === "Enter" && findTelegramChannels()} placeholder="Search Telegram channels, e.g. python jobs" className="input text-sm flex-1" /><button disabled={telegramSearching || telegramQuery.trim().length < 2} onClick={() => findTelegramChannels()} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-40">{telegramSearching ? "Searching…" : "Find channels"}</button></div>{telegramMatches.length > 0 && <div className="mt-3"><div className="text-xs text-[var(--muted)] mb-2">Search results — click + Add</div><div className="flex flex-wrap gap-2">{telegramMatches.map(match => <button key={match.handle} onClick={() => addTelegramChannel(match.handle)} className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--accent)]"><span className="text-[var(--accent)]">+ Add</span><span className="text-[var(--fg)]"> · {match.title}</span><span className="text-[var(--muted)]"> · {match.handle}</span></button>)}</div></div>}<div className="mt-3"><div className="text-xs text-[var(--muted)] mb-2">Chosen channels</div>{selectedTelegramChannels.length ? <div className="flex flex-wrap gap-2">{selectedTelegramChannels.map(handle => <button key={handle} onClick={() => removeTelegramChannel(handle)} className="rounded bg-[var(--accent)]/10 border border-[var(--accent)]/40 px-2 py-1 text-xs text-[var(--fg)]">{handle} ×</button>)}</div> : <div className="text-xs text-[var(--muted)]">None yet — add one or more search results.</div>}</div><div className="grid md:grid-cols-4 gap-2 mt-3"><input value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="Or paste @channel handles" className="input text-sm md:col-span-2" /><input value={telegramKeywords} onChange={event => setTelegramKeywords(event.target.value)} placeholder="Candidate keywords" className="input text-sm" /><label className="text-xs text-[var(--muted)] flex items-center gap-2">Last <input type="number" min={1} max={365} value={telegramDays} onChange={event => setTelegramDays(Number(event.target.value) || 30)} className="input w-16 text-sm" /> days</label><label className="text-xs text-[var(--muted)] flex items-center gap-2">Max/channel <input type="number" min={10} max={1000} value={telegramLimit} onChange={event => setTelegramLimit(Number(event.target.value) || 100)} className="input w-16 text-sm" /></label></div></div>}</div>
