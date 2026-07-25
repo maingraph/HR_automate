@@ -19,6 +19,8 @@ export type StageRun = {
   error?: string;
   attempt: number;
   created_at?: string;
+  started_at?: string;
+  ended_at?: string;
 };
 
 export type CandidateDataset = {
@@ -51,6 +53,15 @@ export type BrowserSession = {
   locked_search_url?: string;
   viewer_url?: string;
   last_error?: string;
+};
+
+export type BrowserFilterPlan = {
+  keywords: string;
+  current_title: string;
+  function: string;
+  geography: string;
+  seniority?: string | null;
+  notes: string[];
 };
 
 export const listStages = (jobId: string) => apiFetch<StageRun[]>(`/jobs/${jobId}/stage-runs`);
@@ -108,3 +119,15 @@ export const createBrowserSession = (jobId: string) => apiFetch<BrowserSession>(
 export const getJobBrowserSession = (jobId: string) => apiFetch<BrowserSession | null>(`/jobs/${jobId}/browser-session`);
 export const browserCommand = (sessionId: string, action: "open-search" | "lock-search" | "take-control" | "release-control", body: Record<string, unknown> = {}) =>
   apiFetch<BrowserSession>(`/browser-sessions/${sessionId}/${action}`, { method: "POST", body: JSON.stringify(body) });
+export const browserInput = (sessionId: string, body: { text?: string; key?: "Backspace" | "Delete" | "Tab" | "Enter" | "Escape" | "Control+A" }) =>
+  apiFetch<{ state: string; current_url?: string }>(`/browser-sessions/${sessionId}/input`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const getBrowserFilterPlan = (sessionId: string) =>
+  apiFetch<BrowserFilterPlan>(`/browser-sessions/${sessionId}/filter-plan`);
+export const applyBrowserFilters = (sessionId: string) =>
+  apiFetch<BrowserSession & { filter_plan: BrowserFilterPlan; applied: string[] }>(
+    `/browser-sessions/${sessionId}/apply-filters`,
+    { method: "POST", body: JSON.stringify({ confirmed: true }) },
+  );

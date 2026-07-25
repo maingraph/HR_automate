@@ -12,6 +12,7 @@ from app.core.auth import (
     hash_password,
     verify_password,
 )
+from app.core.config import settings
 from app.core.db import get_supabase
 from app.core.logging import get_logger
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
@@ -23,6 +24,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest) -> TokenResponse:
     """Register a new org + owner user. Self-serve MVP — can gate later."""
+    if not settings.allow_registration:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is disabled for this deployment",
+        )
     sb = get_supabase()
 
     # Check if email already exists

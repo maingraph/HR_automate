@@ -93,6 +93,7 @@ export default function JobPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [logs, setLogs] = useState<PipelineRun[]>([]);
+  const [hasModularData, setHasModularData] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   
   // Filter state
@@ -149,9 +150,14 @@ export default function JobPage() {
     setProgress(prog.progress || {});
   }, [params.id]);
 
+  const loadModularData = useCallback(async () => {
+    const datasets = await apiFetch<Array<{ id: string }>>(`/jobs/${params.id}/datasets`).catch(() => []);
+    setHasModularData(datasets.length > 0);
+  }, [params.id]);
+
   const load = useCallback(async () => {
-    await Promise.all([loadJob(), loadCandidates(), loadLogs(), loadProgress()]);
-  }, [loadJob, loadCandidates, loadLogs, loadProgress]);
+    await Promise.all([loadJob(), loadCandidates(), loadLogs(), loadProgress(), loadModularData()]);
+  }, [loadJob, loadCandidates, loadLogs, loadProgress, loadModularData]);
 
   // WebSocket connection
   const { data: lastMessage } = useWebSocket(`/ws/jobs/${params.id}`);
@@ -322,7 +328,7 @@ export default function JobPage() {
               Retry
             </button>
           )}
-          {isDone && (
+          {isDone && !hasModularData && (
             <button onClick={exportCandidates} className="px-4 py-2 text-sm rounded-lg bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]">download</span>
               Export
@@ -346,6 +352,7 @@ export default function JobPage() {
 
       <WorkflowWorkspace jobId={params.id} />
 
+      {!hasModularData && <>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-4">
@@ -778,6 +785,7 @@ export default function JobPage() {
           </table>
         </div>
       </Card>
+      </>}
     </div>
   );
 }

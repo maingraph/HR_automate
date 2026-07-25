@@ -102,7 +102,8 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8210}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
     env_file: .env
     ports:
       - "${SOURCER_FRONTEND_PORT:-3210}:3000"

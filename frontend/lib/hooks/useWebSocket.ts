@@ -84,17 +84,26 @@ export function useWebSocket<T = any>(
         // Already a full WebSocket URL
         wsUrl = url;
       } else if (url.startsWith('/')) {
-        // Path like /ws/jobs/123 - connect to backend (port 8000)
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
-        const wsHost = apiUrl.replace(/^https?:\/\//, '');
-        wsUrl = `${wsProtocol}//${wsHost}${url}`;
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+        if (apiUrl.startsWith('/')) {
+          const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl = `${wsProtocol}//${window.location.host}${apiUrl}${url}`;
+        } else {
+          const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
+          const wsHost = apiUrl.replace(/^https?:\/\//, '');
+          wsUrl = `${wsProtocol}//${wsHost}${url}`;
+        }
       } else {
         // Room format like "job:123" - convert to path
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
-        const wsHost = apiUrl.replace(/^https?:\/\//, '');
-        wsUrl = `${wsProtocol}//${wsHost}/ws/${url.replace(':', '/')}`;
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+        if (apiUrl.startsWith('/')) {
+          const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl = `${wsProtocol}//${window.location.host}${apiUrl}/ws/${url.replace(':', '/')}`;
+        } else {
+          const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
+          const wsHost = apiUrl.replace(/^https?:\/\//, '');
+          wsUrl = `${wsProtocol}//${wsHost}/ws/${url.replace(':', '/')}`;
+        }
       }
 
       setStatus('connecting');

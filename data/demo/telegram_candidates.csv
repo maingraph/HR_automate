@@ -1,0 +1,6 @@
+full_name,headline,location,source,linkedin_url,telegram_url,email,skills,years_experience,bio
+Anna Kovalenko,Senior Backend Engineer,Warsaw Poland,telegram,https://www.linkedin.com/in/anna-kovalenko-demo,https://t.me/anna_demo,anna.k@example.com,"Python;FastAPI;PostgreSQL;AWS",7,"Open to senior backend roles. FastAPI and cloud systems."
+Tomasz Zielinski,Senior Python Engineer,Gdansk Poland,telegram,,https://t.me/tomasz_demo,tomasz.z@example.com,"Python;FastAPI;PostgreSQL;Azure;Docker",8,"Built B2B SaaS backends and internal developer platforms."
+Nina Horvat,Backend Tech Lead,Zagreb Croatia,telegram,https://www.linkedin.com/in/nina-horvat-demo,https://t.me/nina_demo,nina.h@example.com,"Python;Django;Kafka;Kubernetes;AWS",9,"Hands-on lead for a six-person backend team. Available remotely."
+Lucas Meyer,Senior Platform Engineer,Berlin Germany,telegram,https://www.linkedin.com/in/lucas-meyer-demo,https://t.me/lucas_demo,lucas.m@example.com,"Python;Go;Kubernetes;Terraform;GCP",7,"Platform engineer interested in product backend ownership."
+Sara Lind,Python Backend Engineer,Malmo Sweden,telegram,,https://t.me/sara_lind_demo,sara.l@example.com,"Python;FastAPI;SQLAlchemy;PostgreSQL;Docker",5,"Backend specialist in HR technology and workflow automation."

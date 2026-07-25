@@ -34,11 +34,15 @@ data/*
 !data/uploads/
 data/uploads/*
 !data/uploads/.gitkeep
+!data/demo/
+!data/demo/*.csv
 browser-data/
 debug/
 debug-*
 *.png
 *.html
+!docs/brief/images/*.png
+tmp/
 
 # Local assistant configuration and generated diagnostics
 .agents/

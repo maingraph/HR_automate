@@ -7,6 +7,7 @@ import { saveAuth, type AuthResponse } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const registrationEnabled = process.env.NEXT_PUBLIC_ALLOW_REGISTRATION !== "false";
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -66,7 +67,7 @@ export default function LoginPage() {
         {/* Card */}
         <div className="bg-white rounded-lg border border-[#c7c5d4] p-8 shadow-sm">
           {/* Mode Toggle */}
-          <div className="flex gap-2 mb-6 p-1 bg-[#f2f3ff] rounded-lg">
+          {registrationEnabled && <div className="flex gap-2 mb-6 p-1 bg-[#f2f3ff] rounded-lg">
             <button
               type="button"
               onClick={() => setMode("login")}
@@ -91,7 +92,7 @@ export default function LoginPage() {
             >
               Register
             </button>
-          </div>
+          </div>}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

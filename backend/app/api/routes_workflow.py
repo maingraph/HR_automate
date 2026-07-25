@@ -12,7 +12,9 @@ from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
 from app.core.db import get_supabase, response_data
 from app.schemas.workflow import (
+    BrowserFilterApply,
     BrowserOpenSearch,
+    BrowserInput,
     BrowserSessionCreate,
     CandidateRecordPatch,
     DatasetOut,
@@ -80,7 +82,17 @@ async def create_stage_run(
     current: CurrentUser = Depends(get_current_user),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
-    _job(job_id, current)
+    job = _job(job_id, current)
+    # A zero-row Telegram dataset is only useful when the configured channels
+    # were actually scanned.  Do not silently create one when the source scope
+    # was never supplied.
+    if payload.stage_type == "telegram_extract":
+        channels = payload.config.get("channels") or job.get("tg_channels") or []
+        if not channels:
+            raise HTTPException(
+                status_code=422,
+                detail="Telegram needs at least one public or joined channel. Add @channel handles before starting extraction.",
+            )
     try:
         stage, created = stage_service.create_stage(
             org_id=current.org_id,
@@ -188,7 +200,12 @@ async def continue_stage(stage_id: str, current: CurrentUser = Depends(get_curre
     try:
         if stage.get("output_dataset_id"):
             dataset_service.seal_dataset(stage["output_dataset_id"], current.org_id)
-        return stage_service.transition_stage(stage_id, current.org_id, "completed")
+        completed = stage_service.transition_stage(stage_id, current.org_id, "completed")
+        if stage["stage_type"] == "ai_grade":
+            get_supabase().table("jobs").update({"status": "done"}).eq(
+                "id", stage["job_id"]
+            ).eq("org_id", current.org_id).execute()
+        return completed
     except Exception as exc:
         raise _http_error(exc)
 
@@ -339,6 +356,56 @@ async def _agent_call(path: str, body: Optional[dict[str, Any]] = None) -> dict[
     return response.json()
 
 
+def _browser_session_for_client(session: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if not session:
+        return session
+    separator = "&" if "?" in settings.browser_viewer_url else "?"
+    viewer_url = (
+        f"{settings.browser_viewer_url}{separator}"
+        f"viewer_token={settings.browser_viewer_token}"
+    )
+    return {**session, "viewer_url": viewer_url}
+
+
+def _job_filter_plan(job: dict[str, Any]) -> dict[str, Any]:
+    title = (job.get("title") or "").lower()
+    if "backend" in title or "back end" in title:
+        current_title = "Back End Developer"
+    elif "frontend" in title or "front end" in title:
+        current_title = "Frontend Developer"
+    elif "full stack" in title or "fullstack" in title:
+        current_title = "Full Stack Engineer"
+    elif "devops" in title:
+        current_title = "DevOps Engineer"
+    elif "data scientist" in title:
+        current_title = "Data Scientist"
+    else:
+        current_title = job.get("title") or ""
+
+    geo = (job.get("geo") or "").lower()
+    if "europe" in geo:
+        geography = "Europe"
+    elif "emea" in geo:
+        geography = "EMEA"
+    else:
+        geography = (job.get("geo") or "").replace(" remote", "").strip()
+
+    return {
+        "keywords": " ".join([
+            job.get("title") or "",
+            *((job.get("skills") or [])[:3]),
+        ]).strip(),
+        "current_title": current_title,
+        "function": "Engineering",
+        "geography": geography,
+        "seniority": None,
+        "notes": [
+            "Remote is not a candidate-location filter; geography uses Europe.",
+            "Sales Navigator has no reliable Senior individual-contributor option, so seniority stays in keywords.",
+        ],
+    }
+
+
 @router.post("/browser-sessions")
 async def create_browser_session(
     payload: BrowserSessionCreate,
@@ -364,9 +431,10 @@ async def create_browser_session(
     updated = get_supabase().table("browser_sessions").update({
         "state": agent.get("state", "ready"),
         "current_url": agent.get("current_url"),
+        "viewer_url": settings.browser_viewer_url,
     }).eq("id", session["id"]).execute()
     _publish_browser(payload.job_id, session["id"], "browser.status", state=updated.data[0]["state"])
-    return updated.data[0]
+    return _browser_session_for_client(updated.data[0])
 
 
 @router.get("/browser-sessions/{session_id}")
@@ -381,7 +449,7 @@ async def get_browser_session(
     session = response_data(response)
     if not session:
         raise HTTPException(status_code=404, detail="Browser session not found")
-    return session
+    return _browser_session_for_client(session)
 
 
 @router.get("/jobs/{job_id}/browser-session")
@@ -394,7 +462,23 @@ async def get_job_browser_session(
         get_supabase().table("browser_sessions").select("*")
         .eq("job_id", job_id).eq("org_id", current.org_id).maybe_single().execute()
     )
-    return response_data(response)
+    session = response_data(response)
+    if not session:
+        return None
+    try:
+        agent = await _agent_call(
+            "/sessions/start",
+            {"session_id": session["id"], "url": session.get("current_url")},
+        )
+        state = "awaiting_auth" if agent.get("awaiting_auth") else session.get("state", "ready")
+        updated = get_supabase().table("browser_sessions").update({
+            "state": state,
+            "current_url": agent.get("current_url") or session.get("current_url"),
+        }).eq("id", session["id"]).eq("org_id", current.org_id).execute()
+        session = updated.data[0]
+    except HTTPException:
+        session = {**session, "state": "stopped"}
+    return _browser_session_for_client(session)
 
 
 @router.post("/browser-sessions/{session_id}/open-search")
@@ -406,20 +490,87 @@ async def open_browser_search(
     session = await get_browser_session(session_id, current)
     job = _job(session["job_id"], current)
     if payload.url:
-        url = payload.url
-    else:
-        from app.scrapers.salesnav_url_builder import build_sales_nav_url
-        url = build_sales_nav_url(
-            title=job.get("title"), location=job.get("geo"),
-            seniority=job.get("seniority"), skills=job.get("skills") or [],
+        agent = await _agent_call(
+            "/sessions/open",
+            {"session_id": session_id, "url": payload.url},
         )
-    agent = await _agent_call("/sessions/open", {"session_id": session_id, "url": url})
+    else:
+        keyword_parts = [
+            job.get("title") or "",
+            *((job.get("skills") or [])[:3]),
+        ]
+        keywords = " ".join(part.strip() for part in keyword_parts if part and part.strip())
+        agent = await _agent_call(
+            "/sessions/search",
+            {"session_id": session_id, "text": keywords},
+        )
     state = "awaiting_auth" if agent.get("awaiting_auth") else "manual_control"
     result = get_supabase().table("browser_sessions").update({
-        "state": state, "current_url": agent.get("current_url", url)
+        "state": state, "current_url": agent.get("current_url", payload.url)
     }).eq("id", session_id).eq("org_id", current.org_id).execute()
     _publish_browser(session["job_id"], session_id, "browser.url_changed", current_url=result.data[0]["current_url"], state=state)
     return result.data[0]
+
+
+@router.post("/browser-sessions/{session_id}/input")
+async def send_browser_input(
+    session_id: str,
+    payload: BrowserInput,
+    current: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    session = await get_browser_session(session_id, current)
+    if bool(payload.text) == bool(payload.key):
+        raise HTTPException(status_code=400, detail="Provide exactly one of text or key")
+    result = await _agent_call(
+        "/sessions/input",
+        {"session_id": session_id, "text": payload.text, "key": payload.key},
+    )
+    return {
+        "state": session["state"],
+        "current_url": result.get("current_url", session.get("current_url")),
+    }
+
+
+@router.get("/browser-sessions/{session_id}/filter-plan")
+async def get_browser_filter_plan(
+    session_id: str,
+    current: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    session = await get_browser_session(session_id, current)
+    return _job_filter_plan(_job(session["job_id"], current))
+
+
+@router.post("/browser-sessions/{session_id}/apply-filters")
+async def apply_browser_filters(
+    session_id: str,
+    payload: BrowserFilterApply,
+    current: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    if not payload.confirmed:
+        raise HTTPException(status_code=409, detail="Filter application requires confirmation")
+    session = await get_browser_session(session_id, current)
+    plan = _job_filter_plan(_job(session["job_id"], current))
+    agent = await _agent_call(
+        "/sessions/apply-filters",
+        {"session_id": session_id, "cursor": plan},
+    )
+    state = "awaiting_auth" if agent.get("awaiting_auth") else "manual_control"
+    result = get_supabase().table("browser_sessions").update({
+        "state": state,
+        "current_url": agent.get("current_url", session.get("current_url")),
+    }).eq("id", session_id).eq("org_id", current.org_id).execute()
+    _publish_browser(
+        session["job_id"],
+        session_id,
+        "browser.url_changed",
+        current_url=result.data[0]["current_url"],
+        state=state,
+    )
+    return {
+        **_browser_session_for_client(result.data[0]),
+        "filter_plan": plan,
+        "applied": agent.get("applied", []),
+    }
 
 
 @router.post("/browser-sessions/{session_id}/lock-search")

@@ -78,3 +78,12 @@ class BrowserSessionCreate(BaseModel):
 
 class BrowserOpenSearch(BaseModel):
     url: Optional[str] = None
+
+
+class BrowserInput(BaseModel):
+    text: Optional[str] = Field(None, max_length=4096)
+    key: Optional[Literal["Backspace", "Delete", "Tab", "Enter", "Escape", "Control+A"]] = None
+
+
+class BrowserFilterApply(BaseModel):
+    confirmed: bool = False

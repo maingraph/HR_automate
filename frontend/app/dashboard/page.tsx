@@ -132,13 +132,21 @@ function DashboardInner() {
         const activeJobs = jobsRes.filter((j) =>
           ["queued", "running", "running_deep"].includes(j.status)
         );
-        let totalCandidates = 0;
-        for (const job of jobsRes) {
-          totalCandidates +=
-            (job.stats?.telegram_count || 0) +
-            (job.stats?.apollo_count || 0) +
-            (job.stats?.linkedin_count || 0);
-        }
+        const datasetCounts = await Promise.all(
+          jobsRes.map(async (job) => {
+            try {
+              const datasets = await apiFetch<Array<{ row_count?: number }>>(`/jobs/${job.id}/datasets`);
+              return Math.max(0, ...datasets.map((dataset) => dataset.row_count || 0));
+            } catch {
+              return (
+                (job.stats?.telegram_count || 0) +
+                (job.stats?.apollo_count || 0) +
+                (job.stats?.linkedin_count || 0)
+              );
+            }
+          })
+        );
+        const totalCandidates = datasetCounts.reduce((sum, count) => sum + count, 0);
         setStats({
           total_jobs: jobsRes.length,
           active_jobs: activeJobs.length,

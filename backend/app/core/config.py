@@ -81,7 +81,11 @@ class Settings(BaseSettings):
     api_port: int = Field(8000, alias="API_PORT")
     frontend_url: str = Field("http://localhost:3210", alias="FRONTEND_URL")
     browser_agent_url: str = Field("http://browser-agent:8010", alias="BROWSER_AGENT_URL")
-    browser_viewer_url: str = Field("http://127.0.0.1:6210/vnc.html?autoconnect=1&resize=scale", alias="BROWSER_VIEWER_URL")
+    browser_viewer_url: str = Field(
+        "/browser/vnc.html?autoconnect=1&resize=scale&path=browser%2Fwebsockify",
+        alias="BROWSER_VIEWER_URL",
+    )
+    browser_viewer_token: str = Field("", alias="BROWSER_VIEWER_TOKEN")
     browser_agent_token: str = Field("local-browser-agent", alias="BROWSER_AGENT_TOKEN")
     log_level: str = Field("INFO", alias="LOG_LEVEL")
 
@@ -97,6 +101,7 @@ class Settings(BaseSettings):
     jwt_secret: str = Field("", alias="JWT_SECRET")  # MUST set in .env for production
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(10080, alias="JWT_EXPIRE_MINUTES")  # 7 days
+    allow_registration: bool = Field(True, alias="ALLOW_REGISTRATION")
 
     model_config = SettingsConfigDict(
         env_file=str(Path(__file__).resolve().parents[3] / ".env"),

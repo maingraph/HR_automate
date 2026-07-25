@@ -218,6 +218,7 @@ class SalesNavScraper:
             # STEP 1: Get expected data from card BEFORE clicking
             expected_name = await self.card_extractor.extract_name(card)
             expected_company = await self.card_extractor.extract_company(card)
+            card_url = await self.card_extractor.extract_profile_url(card)
 
             log.debug(f"Clicking profile: {expected_name or '(empty)'} at {expected_company or '(empty)'}")
 
@@ -266,6 +267,7 @@ class SalesNavScraper:
                 "current_company": current_company or "",
                 "location": location or "",
                 "profile_url": profile_url or "",
+                "salesnav_url": card_url or (page.url if "/sales/lead/" in page.url else ""),
                 "about": about,
                 "experience": experience or [],
                 "education": education or [],

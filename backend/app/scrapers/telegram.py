@@ -145,9 +145,11 @@ async def scrape_channels_async(
     days_back: int = 60,
     per_channel_limit: int = 1000,
 ) -> list[dict[str, Any]]:
+    channels = [channel for channel in channels if str(channel).strip()]
+    if not channels:
+        raise ValueError("Telegram needs at least one channel to scan")
     if not settings.telegram_api_id or not settings.telegram_api_hash:
-        log.warning("Telegram creds missing; skipping telegram scrape")
-        return []
+        raise RuntimeError("Telegram API credentials are not configured")
 
     # Use the dedicated scraper session — never the listener session.
     # Falls back to the listener session if the scraper session doesn't exist
@@ -172,11 +174,9 @@ async def scrape_channels_async(
     client = TelegramClient(session_path, settings.telegram_api_id, settings.telegram_api_hash)
     await client.connect()
     if not await client.is_user_authorized():
-        log.error(
-            "Telegram session not authorized. Run scripts/telegram_login.py on the host first."
-        )
+        log.error("Telegram session not authorized")
         await client.disconnect()
-        return []
+        raise RuntimeError("Telegram needs a one-time login confirmation before it can scan channels")
     try:
         for ch in channels:
             try:

@@ -1,0 +1,25 @@
+services:
+  web:
+    image: node:20-alpine
+    command: node /gateway/gateway.mjs
+    environment:
+      PORT: 8080
+      BROWSER_VIEWER_TOKEN: ${BROWSER_VIEWER_TOKEN}
+    volumes:
+      - ./deploy/web/gateway.mjs:/gateway/gateway.mjs:ro
+    ports:
+      - "127.0.0.1:${SOURCER_WEB_PORT:-8088}:8080"
+    depends_on:
+      - frontend
+      - api
+      - browser-agent
+    restart: unless-stopped
+
+  api:
+    ports: !reset []
+
+  frontend:
+    ports: !reset []
+
+  browser-agent:
+    ports: !reset []

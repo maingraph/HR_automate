@@ -32,20 +32,20 @@ Workflow:
 
 ## Quick start
 
-Requirements: Docker Desktop, Supabase project, and configured `.env`.
+Requirements: Docker Desktop and configured `.env`. A private local database is
+included, so a Supabase account is optional.
 
 ```bash
 cp .env.example .env
-# Configure Supabase, JWT, AI, and optional source credentials.
-python scripts/apply_schema.py
-docker compose up --build
+# Configure JWT, AI, and optional source credentials.
+bash launch.sh
 ```
 
 Open:
 
 - App: `http://localhost:3210`
 - API: `http://localhost:8210/docs`
-- Embedded browser viewer: `http://127.0.0.1:6210/vnc.html`
+- Embedded browser: inside each job workspace
 
 Generate a local browser-agent token before starting:
 
@@ -54,6 +54,47 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 Put result in `BROWSER_AGENT_TOKEN` inside `.env`.
+
+`launch.sh` generates a private noVNC password in `.env` when one is missing.
+The viewer asks for this password before showing the persistent Chromium session.
+
+### Single web address
+
+The web profile puts the frontend, API, WebSocket events, and password-protected
+browser viewer behind one localhost address:
+
+```bash
+SOURCER_WEB_MODE=1 bash launch.sh
+```
+
+Open `http://localhost:8088`. For a temporary HTTPS pilot from the same Mac:
+
+```bash
+cloudflared tunnel --url http://localhost:8088
+```
+
+The generated `trycloudflare.com` address is temporary and works only while the
+Mac, Docker, and tunnel stay running. A permanent pilot should use a small
+dedicated server and a named domain.
+
+### Database modes
+
+`SOURCER_DATABASE_MODE=local` is the default. It starts PostgreSQL and PostgREST
+privately alongside Sourcer, applies ordered migrations on first launch, and
+binds the database only to `127.0.0.1:55422`. The local compatibility schema
+omits the unused legacy pgvector column; modular similarity results remain in
+versioned dataset records.
+
+To retain an existing Supabase project, set:
+
+```text
+SOURCER_DATABASE_MODE=external
+```
+
+Then configure the three `SUPABASE_*` values and apply migrations with
+`python scripts/apply_schema.py`.
+
+Readiness is available at `http://localhost:8210/health/ready`.
 
 ## Components
 

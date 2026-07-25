@@ -1,0 +1,6 @@
+full_name,headline,location,source,linkedin_url,email,skills,years_experience,bio
+Anna Kovalenko,Senior Python Backend Engineer,Warsaw Poland,salesnav,https://www.linkedin.com/in/anna-kovalenko-demo,anna.k@example.com,"Python;FastAPI;PostgreSQL;AWS;Docker",7,"Backend engineer building high-volume SaaS APIs. Led FastAPI migration and mentors three engineers."
+Mateusz Nowak,Staff Backend Engineer,Krakow Poland,salesnav,https://www.linkedin.com/in/mateusz-nowak-demo,mateusz.n@example.com,"Python;Django;PostgreSQL;Kubernetes;GCP",10,"Staff engineer focused on distributed systems, platform reliability, and technical leadership."
+Elena Petrova,Senior Software Engineer,Prague Czechia,salesnav,https://www.linkedin.com/in/elena-petrova-demo,elena.p@example.com,"Python;FastAPI;Redis;Kafka;AWS",6,"Designed event-driven fintech services and owns production observability."
+Jonas Berg,Backend Engineer,Stockholm Sweden,salesnav,https://www.linkedin.com/in/jonas-berg-demo,jonas.b@example.com,"Python;Flask;PostgreSQL;Docker",5,"Product-minded backend engineer with marketplace and payments experience."
+Oksana Melnyk,Python Developer,Kyiv Ukraine,salesnav,https://www.linkedin.com/in/oksana-melnyk-demo,oksana.m@example.com,"Python;Django;Celery;PostgreSQL",6,"Senior individual contributor delivering recruitment technology integrations."

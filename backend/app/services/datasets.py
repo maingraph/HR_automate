@@ -18,7 +18,7 @@ SCHEMA_VERSION = 1
 CANONICAL_COLUMNS = [
     "full_name", "first_name", "last_name", "headline", "bio", "location",
     "seniority", "years_experience", "skills", "languages", "linkedin_url",
-    "telegram_url", "email", "phone", "source", "source_id", "open_to_work",
+    "salesnav_url", "profile_link_status", "telegram_url", "email", "phone", "source", "source_id", "open_to_work",
     "positions", "educations", "gemini_score", "gemini_reasoning",
     "gemini_dimensions", "embed_similarity", "red_flags", "raw_text", "raw",
 ]

@@ -226,7 +226,18 @@ def _run_enrich(stage: dict[str, Any], job: dict[str, Any]) -> str:
     )
     config = stage.get("config") or {}
     provider = config.get("provider", "apify")
-    if provider == "local":
+    if provider in {"existing", "skip"}:
+        enriched = [
+            {
+                **row,
+                "scan_depth": row.get("scan_depth", 1),
+                "enrichment_status": "skipped_by_user" if provider == "skip" else "existing_profile_data",
+            }
+            for row in rows
+        ]
+        _flush(stage, dataset["id"], enriched, len(enriched), len(enriched), complete=True)
+        return "ready"
+    elif provider == "local":
         session_id = config.get("browser_session_id")
         if not session_id:
             raise ValueError("Local enrichment requires browser_session_id")

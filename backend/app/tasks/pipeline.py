@@ -327,10 +327,17 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
     text_parts.extend(p.get("skills") or [])
     raw_text = "\n".join(t for t in text_parts if t)
 
-    url = p.get("profile_url") or ""
+    # Sales Navigator often exposes its internal lead URL but not a public
+    # /in/ profile link.  Keep those distinct: a SalesNav URL is still a
+    # valuable traceable source link, but must never masquerade as a public
+    # LinkedIn profile that downstream enrichment can open.
+    source_url = p.get("salesnav_url") or p.get("profile_url") or ""
+    public_url = p.get("linkedin_url") or p.get("profile_url") or ""
+    if "/in/" not in public_url:
+        public_url = ""
     return {
         "source": "linkedin_salesnav",
-        "source_id": url or None,
+        "source_id": source_url or None,
         "full_name": p.get("full_name"),
         "headline": p.get("headline"),
         "bio": p.get("about"),
@@ -338,10 +345,16 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
         "location": p.get("location"),
         "skills": p.get("skills") or [],
         "languages": p.get("languages") or [],
-        "linkedin_url": url or None,
+        "linkedin_url": public_url or None,
+        "salesnav_url": source_url or None,
+        "profile_link_status": "public_link_captured" if public_url else "public_link_not_exposed_by_salesnav",
         "positions": exp,
         "educations": edu,
-        "raw": {"current_company": p.get("current_company") or ""},
+        "raw": {
+            "current_company": p.get("current_company") or "",
+            "salesnav_url": source_url or None,
+            "profile_link_status": "public_link_captured" if public_url else "public_link_not_exposed_by_salesnav",
+        },
         "scan_depth": 2,
     }
 
