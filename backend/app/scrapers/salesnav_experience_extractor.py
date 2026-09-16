@@ -1,11 +1,13 @@
 """Sales Navigator experience extractor — extracts work history from sidebar."""
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from playwright.async_api import Page
 
 from app.core.logging import get_logger
+from app.scrapers.salesnav_semantic_sections import read_profile_section
 from app.scrapers.salesnav_selectors import SIDEBAR_SELECTORS
 from app.scrapers.salesnav_text_utils import sanitize_text
 
@@ -30,7 +32,7 @@ class ExperienceExtractor:
                 container = await page.query_selector(SIDEBAR_SELECTORS["container"][1])
 
             if not container:
-                return None
+                return await self._extract_semantic_experience(page)
 
             # Try to expand all experiences first
             await self._expand_all_experiences(page)
@@ -44,7 +46,7 @@ class ExperienceExtractor:
 
             if not experience_entries:
                 log.debug("No experience entries found using DOM selector")
-                return None
+                return await self._extract_semantic_experience(page)
 
             log.debug(f"Found {len(experience_entries)} experience entries using DOM")
 
@@ -105,6 +107,21 @@ class ExperienceExtractor:
                         clean_title = sanitize_text(title)
                         clean_company = sanitize_text(company)
 
+                        # Sales Navigator rotates generated class names for date
+                        # spans.  The complete entry's rendered text is stable,
+                        # though, and contains the date range and tenure.
+                        if not date_range:
+                            entry_text = sanitize_text(await entry.inner_text() or "")
+                            date_match = re.search(
+                                r"(?:[A-Z][a-z]{2}\s+)?(?:19|20)\d{2}\s*[–-]\s*"
+                                r"(?:Present|(?:[A-Z][a-z]{2}\s+)?(?:19|20)\d{2})"
+                                r"(?:\s*[·•]\s*\d+\s*(?:yr|yrs|year|years|mo|mos|month|months).*)?",
+                                entry_text,
+                                re.IGNORECASE,
+                            )
+                            if date_match:
+                                date_range = date_match.group(0)
+
                         # Skip if title or company is too short
                         if len(clean_title) >= 3 and len(clean_company) >= 2:
                             exp_entry = {
@@ -137,10 +154,58 @@ class ExperienceExtractor:
                 return experience
 
             log.debug("No valid experience entries extracted")
-            return None
+            return await self._extract_semantic_experience(page)
 
         except Exception as e:
             log.error(f"Error extracting experience: {e}")
+            return await self._extract_semantic_experience(page)
+
+    async def _extract_semantic_experience(self, page: Page) -> Optional[list[dict[str, str]]]:
+        """Fallback for current profile drawer markup with generated classes."""
+        try:
+            section = await read_profile_section(page, r"experience$")
+            entries: list[dict[str, str]] = []
+            for item in section.get("items") or []:
+                title = sanitize_text(next(iter(item.get("headings") or []), ""))
+                company = sanitize_text(next(
+                    (link.get("text", "") for link in item.get("links") or [] if link.get("text")),
+                    "",
+                ))
+                if not title or not company:
+                    continue
+                paragraphs = [sanitize_text(value) for value in item.get("paragraphs") or []]
+                date_parts = [value for value in paragraphs if any(char.isdigit() for char in value)]
+                entry = {
+                    "title": title,
+                    "company": company,
+                    "duration": date_parts[0] if date_parts else "",
+                }
+                location = next((value for value in paragraphs if "," in value), "")
+                if location:
+                    entry["location"] = location
+                entries.append(entry)
+            if entries:
+                return entries
+
+            # Modern drawer groups entries in divs, not list items.  Its
+            # rendered order is title, company, date/duration, location.
+            lines = [sanitize_text(value) for value in section.get("lines") or []]
+            date_re = re.compile(r"(?:19|20)\d{2}.*?(?:Present|(?:19|20)\d{2})", re.I)
+            for index, value in enumerate(lines):
+                if not date_re.search(value) or index < 2:
+                    continue
+                title = lines[index - 2]
+                company = lines[index - 1]
+                if title.lower().endswith("experience") or company.lower().endswith("experience"):
+                    continue
+                entry = {"title": title, "company": company, "duration": value}
+                if index + 1 < len(lines) and "," in lines[index + 1]:
+                    entry["location"] = lines[index + 1]
+                if entry not in entries:
+                    entries.append(entry)
+            return entries or None
+        except Exception:
+            log.debug("No semantic experience section found")
             return None
 
     async def _expand_all_experiences(self, page: Page) -> None:

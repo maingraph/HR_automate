@@ -6,6 +6,7 @@ from typing import Optional
 from playwright.async_api import Page
 
 from app.core.logging import get_logger
+from app.scrapers.salesnav_semantic_sections import read_profile_section
 from app.scrapers.salesnav_selectors import SIDEBAR_SELECTORS
 from app.scrapers.salesnav_text_utils import sanitize_text
 
@@ -30,7 +31,7 @@ class EducationExtractor:
                 container = await page.query_selector(SIDEBAR_SELECTORS["container"][1])
 
             if not container:
-                return None
+                return await self._extract_semantic_education(page)
 
             education = []
 
@@ -41,7 +42,7 @@ class EducationExtractor:
 
             if not education_entries:
                 log.debug("No education entries found using DOM selector")
-                return None
+                return await self._extract_semantic_education(page)
 
             log.debug(f"Found {len(education_entries)} education entries using DOM")
 
@@ -95,9 +96,39 @@ class EducationExtractor:
                 log.info(f"Extracted {len(education)} education entries")
                 return education
 
-            log.debug("No valid education entries extracted")
-            return None
+            return await self._extract_semantic_education(page)
 
         except Exception as e:
             log.error(f"Error extracting education: {e}")
+            return await self._extract_semantic_education(page)
+
+    async def _extract_semantic_education(self, page: Page) -> Optional[list[dict[str, str]]]:
+        """Fallback for modern SalesNav drawer markup with generated classes."""
+        try:
+            section = await read_profile_section(page, r"^Education$")
+            education: list[dict[str, str]] = []
+            for item in section.get("items") or []:
+                school = next(iter(item.get("headings") or []), "")
+                if not school:
+                    school = next(
+                        (link.get("text", "") for link in item.get("links") or [] if link.get("text")),
+                        "",
+                    )
+                school = sanitize_text(school)
+                if len(school) < 2:
+                    continue
+                paragraphs = [sanitize_text(value) for value in item.get("paragraphs") or []]
+                paragraphs = [value for value in paragraphs if value and value != school]
+                years = " – ".join(item.get("years") or [])
+                entry = {"school": school}
+                if paragraphs:
+                    entry["degree"] = paragraphs[0]
+                if len(paragraphs) > 1:
+                    entry["field"] = paragraphs[1]
+                if years:
+                    entry["years"] = sanitize_text(years)
+                education.append(entry)
+            return education or None
+        except Exception:
+            log.debug("No semantic education section found")
             return None

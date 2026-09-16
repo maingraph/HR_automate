@@ -94,6 +94,37 @@ class CardExtractor:
                 continue
         return ""
 
+    async def extract_visible_details(self, card: ElementHandle) -> dict[str, object]:
+        """Capture fields and links rendered directly on a search result card.
+
+        Sales Navigator often renders About and Experience in the card while
+        withholding them from its lead-details panel.  Read card-local DOM so
+        extraction does not depend on that panel loading.
+        """
+        try:
+            return await card.evaluate(
+                """card => {
+                  const clean = value => (value || '').replace(/\\s+/g, ' ').trim();
+                  const field = label => {
+                    const term = [...card.querySelectorAll('dt')].find(node => clean(node.textContent).replace(/:$/, '') === label);
+                    return term ? (term.nextElementSibling?.innerText || term.nextElementSibling?.textContent || '') : '';
+                  };
+                  const links = [...card.querySelectorAll('a[href]')].map(link => ({
+                    href: link.href,
+                    text: clean(link.textContent),
+                  }));
+                  return {
+                    about: field('About'),
+                    experience: field('Experience'),
+                    salesnav_url: links.find(link => link.href.includes('/sales/lead/'))?.href || '',
+                    linkedin_url: links.find(link => /linkedin\\.com\\/in\\//.test(link.href))?.href || '',
+                    links,
+                  };
+                }"""
+            )
+        except Exception:
+            return {}
+
     async def extract_connection_degree(self, card: ElementHandle) -> str:
         """Extract connection degree from profile card."""
         try:

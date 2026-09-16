@@ -47,6 +47,10 @@ CARD_SELECTORS = {
 # Sidebar selectors (detailed profile view)
 SIDEBAR_SELECTORS = {
     "container": [
+        # Current Sales Navigator lead drawer (July 2026).  This is more
+        # stable than generated class hashes and is scoped to the open drawer.
+        'div.lead-sidesheet',
+        'div[class*="lead-details-sidesheet"]',
         'aside',
         'div[class*="lead-details"]',
     ],

@@ -216,12 +216,24 @@ class SidebarExtractor:
     async def extract_profile_url_with_retry(
         self, page: Page, max_retries: int = 3
     ) -> str:
-        """Extract profile URL from sidebar with retry logic."""
+        """Extract public profile URL from sidebar with retry logic.
+
+        Sales Navigator keeps the public ``/in/`` URL behind the profile
+        sidebar's overflow menu.  It is not present in the card or sidebar DOM
+        until that read-only menu is opened.  Read the ``View LinkedIn
+        profile`` link directly; clipboard contents from "Copy LinkedIn.com
+        URL" are unreliable in browser automation.
+        """
         for attempt in range(max_retries):
             url = await self._extract_profile_url_from_sidebar(page)
 
             if url and "/in/" in url:
                 log.debug(f"Found LinkedIn URL on attempt {attempt + 1}")
+                return url
+
+            url = await self._extract_public_url_from_actions_menu(page)
+            if url:
+                log.debug(f"Found public LinkedIn URL from actions menu on attempt {attempt + 1}")
                 return url
 
             if attempt < max_retries - 1:
@@ -230,6 +242,65 @@ class SidebarExtractor:
 
         # Try alternative methods
         return await self._extract_url_from_alternatives(page)
+
+    async def _extract_public_url_from_actions_menu(self, page: Page) -> str:
+        """Open sidebar overflow menu and return its public-profile href.
+
+        This touches only the read-only profile-actions menu.  It never saves,
+        messages, connects, or adds notes to the lead.
+        """
+        actions_button = None
+        original_url = page.url
+        try:
+            action_buttons = await page.query_selector_all(
+                'button[aria-label="Open actions overflow menu"]'
+            )
+            actions_button = None
+            for button in action_buttons:
+                if await button.is_visible():
+                    actions_button = button
+                    break
+            if not actions_button and action_buttons:
+                actions_button = action_buttons[-1]
+            if not actions_button:
+                return ""
+
+            await actions_button.click(timeout=5_000, force=True)
+            view_profile = page.get_by_text("View LinkedIn profile", exact=True)
+            await view_profile.wait_for(
+                state="visible", timeout=TIMEOUTS["after_click"] + 4_000
+            )
+
+            # Current SalesNav renders this action as a button, then opens the
+            # public profile in a new tab.  There is no href in the menu DOM.
+            # Read its resulting URL and immediately close only that new tab.
+            try:
+                async with page.context.expect_page(timeout=7_000) as opened:
+                    await view_profile.click(timeout=5_000)
+                public_page = await opened.value
+                await public_page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                href = public_page.url
+                await public_page.close()
+                if "linkedin.com/in/" in href:
+                    return href.split("?")[0]
+            except Exception:
+                # Some SalesNav versions navigate current tab, rather than
+                # opening a popup. Preserve URL and return to locked search.
+                if "linkedin.com/in/" in page.url:
+                    href = page.url.split("?")[0]
+                    await page.goto(original_url, wait_until="domcontentloaded", timeout=30_000)
+                    return href
+                log.debug("View LinkedIn profile did not open a public tab")
+            return ""
+        except Exception:
+            log.debug("Public LinkedIn profile link was not available in sidebar actions")
+            return ""
+        finally:
+            if actions_button:
+                try:
+                    await page.keyboard.press("Escape")
+                except Exception:
+                    pass
 
     async def _extract_profile_url_from_sidebar(self, page: Page) -> str:
         """Extract profile URL from sidebar."""
