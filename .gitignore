@@ -29,6 +29,7 @@ celerybeat-schedule*
 *.xlsx
 *.numbers
 output/
+outputs/
 logs/
 data/*
 !data/uploads/
