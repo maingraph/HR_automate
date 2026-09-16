@@ -8,7 +8,7 @@ services:
     volumes:
       - ./deploy/web/gateway.mjs:/gateway/gateway.mjs:ro
     ports:
-      - "127.0.0.1:${SOURCER_WEB_PORT:-8088}:8080"
+      - "${SOURCER_WEB_PORT:-8088}:8080"
     depends_on:
       - frontend
       - api
