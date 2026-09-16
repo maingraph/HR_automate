@@ -130,11 +130,60 @@ def _run_salesnav(stage: dict[str, Any], job: dict[str, Any]) -> str:
     cursor = checkpoint.get("cursor") or {
         "max_pages": int(config.get("max_pages", 10)),
         "max_profiles": int(config.get("max_profiles", 200)),
+        "fast": bool(config.get("fast", False)),
+        "automation": True,
     }
+    cursor["automation"] = True
+    # A finished extraction leaves the visible browser on its final result
+    # page.  A fresh "rerun same setup" must begin from the locked search URL
+    # instead of silently reusing that final page (which made a 63-result
+    # rerun collect only the 13 cards mounted on page 3).
+    if not cursor.get("extracted") and not cursor.get("page_seen"):
+        session_result = get_supabase().table("browser_sessions").select(
+            "locked_search_url"
+        ).eq("id", session_id).eq("org_id", stage["org_id"]).limit(1).execute()
+        locked_url = (session_result.data or [{}])[0].get("locked_search_url")
+        if locked_url:
+            cursor["locked_search_url"] = locked_url
+            with httpx.Client(timeout=120) as client:
+                # Browser-agent restarts discard in-memory Playwright sessions
+                # while browser_sessions remains persisted. Recreate it before
+                # navigating instead of failing fresh runs with a 404.
+                start = client.post(
+                    f"{settings.browser_agent_url}/sessions/start",
+                    headers={"X-Browser-Agent-Token": settings.browser_agent_token},
+                    json={"session_id": session_id, "url": locked_url},
+                )
+                start.raise_for_status()
+                reset = client.post(
+                    f"{settings.browser_agent_url}/sessions/open",
+                    headers={"X-Browser-Agent-Token": settings.browser_agent_token},
+                    json={"session_id": session_id, "url": locked_url},
+                )
+                reset.raise_for_status()
+                if reset.json().get("awaiting_auth"):
+                    _set_browser_state(session_id, stage["org_id"], "awaiting_auth", current_url=locked_url)
+                    stage_service.transition_stage(stage["id"], stage["org_id"], "awaiting_auth")
+                    return "awaiting_auth"
+                release = client.post(
+                    f"{settings.browser_agent_url}/sessions/release-control",
+                    headers={"X-Browser-Agent-Token": settings.browser_agent_token},
+                    json={"session_id": session_id},
+                )
+                release.raise_for_status()
+            _set_browser_state(session_id, stage["org_id"], "paused", current_url=locked_url)
+    # Persist target immediately.  First card can take several seconds, and
+    # without this the UI shows misleading 0/? while extraction is active.
+    initial_total = int(cursor.get("max_profiles") or config.get("max_profiles", 200))
+    stage_service.set_progress(stage["id"], stage["org_id"], 0, initial_total, cursor=cursor)
+    _publish(stage, "stage.progress", current=0, total=initial_total, dataset_id=dataset["id"])
     while True:
         if _control(stage, dataset["id"]):
             return "paused"
-        with httpx.Client(timeout=120) as client:
+        # Detailed Sales Navigator drawers can take over two minutes for a
+        # large profile.  Do not abort an otherwise valid deep extraction at
+        # the client timeout boundary.
+        with httpx.Client(timeout=180) as client:
             response = client.post(
                 f"{settings.browser_agent_url}/sessions/extract/next",
                 headers={"X-Browser-Agent-Token": settings.browser_agent_token},
@@ -147,6 +196,14 @@ def _run_salesnav(stage: dict[str, Any], job: dict[str, Any]) -> str:
             stage_service.transition_stage(stage["id"], stage["org_id"], "awaiting_auth")
             _publish(stage, "browser.auth_required", browser_session_id=session_id)
             return "awaiting_auth"
+        if result.get("rate_limited"):
+            _set_browser_state(session_id, stage["org_id"], "paused", current_url=result.get("current_url"))
+            stage_service.transition_stage(
+                stage["id"], stage["org_id"], "awaiting_user",
+                error="LinkedIn Sales Navigator rate limit reached. Wait for access to recover before resuming.",
+            )
+            _publish(stage, "browser.rate_limited", browser_session_id=session_id)
+            return "rate_limited"
         cursor = result.get("cursor") or cursor
         profile = result.get("profile")
         current = int(result.get("current") or 0)
@@ -154,8 +211,10 @@ def _run_salesnav(stage: dict[str, Any], job: dict[str, Any]) -> str:
         if profile:
             from app.tasks.pipeline import _salesnav_to_candidate
             profile = _salesnav_to_candidate(profile)
-            if _flush(stage, dataset["id"], [profile], current, total, cursor=cursor):
-                return "paused"
+        # Card parsing can skip a record, but progress must still refresh.
+        # Otherwise running UI stays at 0/? until first successful profile.
+        if _flush(stage, dataset["id"], [profile] if profile else [], current, total, cursor=cursor):
+            return "paused"
         if result.get("done"):
             break
     dataset_service.mark_dataset(dataset["id"], stage["org_id"], "draft")
@@ -219,6 +278,8 @@ def _run_merge(stage: dict[str, Any], job: dict[str, Any]) -> str:
 
 
 def _run_enrich(stage: dict[str, Any], job: dict[str, Any]) -> str:
+    import time
+
     rows = _input_payloads(stage)
     dataset = _ensure_output(
         stage, name=f"{job['title']} — enriched", kind="enriched",
@@ -241,6 +302,7 @@ def _run_enrich(stage: dict[str, Any], job: dict[str, Any]) -> str:
         session_id = config.get("browser_session_id")
         if not session_id:
             raise ValueError("Local enrichment requires browser_session_id")
+        delay_seconds = max(0.0, float(config.get("delay_seconds", 0)))
         start = int((stage.get("checkpoint") or {}).get("offset", 0))
         with httpx.Client(timeout=120) as client:
             for index in range(start, len(rows)):
@@ -264,10 +326,21 @@ def _run_enrich(stage: dict[str, Any], job: dict[str, Any]) -> str:
                     stage_service.transition_stage(stage["id"], stage["org_id"], "awaiting_auth")
                     _publish(stage, "browser.auth_required", browser_session_id=session_id)
                     return "awaiting_auth"
+                if mapped.get("rate_limited"):
+                    _set_browser_state(session_id, stage["org_id"], "paused", current_url=mapped.get("current_url"))
+                    stage_service.transition_stage(
+                        stage["id"], stage["org_id"], "awaiting_user",
+                        error="LinkedIn rate limit reached during public-profile enrichment. Resume after access recovers.",
+                    )
+                    _publish(stage, "browser.rate_limited", browser_session_id=session_id)
+                    return "rate_limited"
                 match = mapped.get("profile") or {}
-                output = {**row, **match, "scan_depth": 2 if match else row.get("scan_depth", 1)}
+                from app.scrapers.linkedin_public_profile import merge_public_profile
+                output = merge_public_profile(row, match) if match else row
                 if _flush(stage, dataset["id"], [output], index + 1, len(rows), offset=index + 1, url=url):
                     return "paused"
+                if delay_seconds and index + 1 < len(rows):
+                    time.sleep(delay_seconds)
         return "ready"
     else:
         from app.scrapers.linkedin_deep import scrape_profiles_deep
