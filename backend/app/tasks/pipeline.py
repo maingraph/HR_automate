@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from typing import Any
 
@@ -313,11 +314,13 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
     """
     exp = p.get("experience") or []
     edu = p.get("education") or []
+    company = _salesnav_clean_company(p.get("current_company") or "", exp)
+    location = _salesnav_clean_location(p.get("location") or "", exp)
     text_parts = [
         p.get("full_name", ""),
         p.get("headline", ""),
-        p.get("current_company", ""),
-        p.get("location", ""),
+        company,
+        location,
         p.get("about", ""),
     ]
     for e in exp:
@@ -335,6 +338,8 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
     public_url = p.get("linkedin_url") or p.get("profile_url") or ""
     if "/in/" not in public_url:
         public_url = ""
+    seniority = _salesnav_seniority(p.get("headline") or "", exp)
+    years_experience = _salesnav_years_experience(exp)
     return {
         "source": "linkedin_salesnav",
         "source_id": source_url or None,
@@ -342,7 +347,9 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
         "headline": p.get("headline"),
         "bio": p.get("about"),
         "raw_text": raw_text,
-        "location": p.get("location"),
+        "location": location,
+        "seniority": seniority,
+        "years_experience": years_experience,
         "skills": p.get("skills") or [],
         "languages": p.get("languages") or [],
         "linkedin_url": public_url or None,
@@ -351,12 +358,69 @@ def _salesnav_to_candidate(p: dict[str, Any]) -> dict[str, Any]:
         "positions": exp,
         "educations": edu,
         "raw": {
-            "current_company": p.get("current_company") or "",
+            "current_company": company,
             "salesnav_url": source_url or None,
             "profile_link_status": "public_link_captured" if public_url else "public_link_not_exposed_by_salesnav",
+            "visible_links": p.get("visible_links") or [],
+            "seniority_source": "derived_from_headline" if seniority else "",
+            "years_experience_source": "earliest_position_year" if years_experience is not None else "",
         },
         "scan_depth": 2,
     }
+
+
+def _salesnav_seniority(headline: str, positions: list[dict[str, Any]]) -> str:
+    """Derive a normalized seniority level when SalesNav does not expose one."""
+    text = " ".join([
+        headline,
+        *(str(position.get("title") or "") for position in positions),
+    ]).lower()
+    for label, terms in (
+        ("C-suite", ("chief ", " ceo", " cto", " coo", " cmo", " cfo")),
+        ("VP", ("vice president", " vp ")),
+        ("Director", ("director",)),
+        ("Head", ("head of",)),
+        ("Manager", ("manager", "team lead", "lead ")),
+        ("Senior", ("senior", " sr.", " sr ")),
+        ("Junior", ("junior", "intern", "trainee")),
+    ):
+        if any(term in text for term in terms):
+            return label
+    return ""
+
+
+def _salesnav_clean_company(value: str, positions: list[dict[str, Any]]) -> str:
+    """Reject card/sidebar spillover; use current position company when safe."""
+    value = " ".join(str(value).split())
+    contaminated = ("mutual connection", "viewed", "about:", "experience:", "connections", " you both know ")
+    if not value or any(token in value.lower() for token in contaminated) or re.search(r"\b(?:19|20)\d{2}\b", value):
+        return str((positions[0] if positions else {}).get("company") or "")
+    return value
+
+
+def _salesnav_clean_location(value: str, positions: list[dict[str, Any]]) -> str:
+    """Keep geographic header only; never export relationship/feed text."""
+    value = " ".join(str(value).split())
+    contaminated = ("mutual connection", "viewed", "about:", "experience:", "connections", " you both know ", "posted")
+    if any(token in value.lower() for token in contaminated) or re.search(r"\b(?:19|20)\d{2}\b", value):
+        value = ""
+    if value and len(value) <= 100 and ("," in value or "area" in value.lower()):
+        return value
+    for position in positions:
+        candidate = " ".join(str(position.get("location") or "").split())
+        if candidate and len(candidate) <= 100 and "," in candidate:
+            return candidate
+    return ""
+
+
+def _salesnav_years_experience(positions: list[dict[str, Any]]) -> int | None:
+    """Estimate experience from earliest position year; never invent a value."""
+    years: list[int] = []
+    for position in positions:
+        years.extend(int(value) for value in re.findall(r"(?:19|20)\d{2}", str(position)))
+    if not years:
+        return None
+    return max(0, datetime.utcnow().year - min(years))
 
 
 @with_fallback(fallback_value=[], log_message="Sales Nav scrape failed")
