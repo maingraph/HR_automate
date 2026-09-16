@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote_plus
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -56,6 +57,14 @@ def _auth_required(url: str) -> bool:
     return any(part in url for part in ("/login", "/authwall", "/checkpoint/", "/challenge/"))
 
 
+async def _salesnav_rate_limited(page: Page) -> bool:
+    """Detect LinkedIn's explicit throttling page before parsing cards."""
+    try:
+        return await page.get_by_text("Too Many Requests", exact=True).count() > 0
+    except Exception:
+        return False
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "sessions": len(sessions)}
@@ -74,22 +83,33 @@ async def start_session(payload: SessionPayload) -> dict[str, Any]:
         sessions.clear()
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     playwright = await async_playwright().start()
-    context = await playwright.chromium.launch_persistent_context(
-        user_data_dir=str(PROFILE_DIR),
-        headless=False,
-        executable_path=EXECUTABLE if Path(EXECUTABLE).exists() else None,
-        viewport={"width": 1440, "height": 900},
-        locale="en-US",
-        timezone_id="Europe/Warsaw",
-        args=[
+    launch_options = {
+        "user_data_dir": str(PROFILE_DIR),
+        "headless": False,
+        "executable_path": EXECUTABLE if Path(EXECUTABLE).exists() else None,
+        "viewport": {"width": 1440, "height": 900},
+        "locale": "en-US",
+        "timezone_id": "Europe/Warsaw",
+        "args": [
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-password-manager-reauthentication",
             "--password-store=basic",
             "--no-first-run",
+            "--window-position=0,0",
+            "--window-size=1440,900",
         ],
-    )
+    }
+    try:
+        context = await playwright.chromium.launch_persistent_context(**launch_options)
+    except Exception:
+        # Chromium can retain these process-singleton links after an abrupt
+        # container replacement.  Retrying once is safe because this service
+        # owns the one persistent profile and there is no active context.
+        for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            (PROFILE_DIR / lock_name).unlink(missing_ok=True)
+        context = await playwright.chromium.launch_persistent_context(**launch_options)
     page = context.pages[0] if context.pages else await context.new_page()
     await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     sessions[payload.session_id] = ManagedSession(payload.session_id, playwright, context, page)
@@ -383,41 +403,188 @@ async def extract_next(payload: SessionPayload) -> dict[str, Any]:
     page = session.page
     if _auth_required(page.url):
         return {"auth_required": True, "current_url": page.url}
-    if session.manual_control:
+    if await _salesnav_rate_limited(page):
+        return {"rate_limited": True, "current_url": page.url}
+    if session.manual_control and not bool((payload.cursor or {}).get("automation")):
         raise HTTPException(status_code=409, detail="Release manual control before extraction")
     if "/sales/search/people" not in page.url:
-        raise HTTPException(status_code=409, detail="Browser is not on a Sales Navigator people search")
+        locked_search_url = str((payload.cursor or {}).get("locked_search_url") or "")
+        if bool((payload.cursor or {}).get("automation")) and "/sales/search/people" in locked_search_url:
+            await page.goto(locked_search_url, wait_until="domcontentloaded", timeout=60_000)
+        else:
+            raise HTTPException(status_code=409, detail="Browser is not on a Sales Navigator people search")
+    search_url = page.url
 
     cursor = dict(payload.cursor or {})
     page_number = int(cursor.get("page", 1))
-    card_index = int(cursor.get("card_index", 0))
     max_pages = int(cursor.get("max_pages", 10))
     max_profiles = int(cursor.get("max_profiles", 200))
     extracted = int(cursor.get("extracted", 0))
     scraper = SalesNavScraper(li_at_cookie="", headless=False, max_pages=max_pages, max_profiles=max_profiles)
 
-    await scraper._scroll_to_load_all(page)
+    # Fresh runs navigate to their locked URL immediately before this call.
+    # Sales Navigator renders result cards asynchronously; without waiting we
+    # mistook the initial empty DOM for a completed zero-result search.
+    await scraper._wait_for_results(page)
+    if await _salesnav_rate_limited(page):
+        return {"rate_limited": True, "current_url": page.url}
+
+    # Sales Navigator uses a virtual list: only the cards around the current
+    # scroll position exist in the DOM.  A numeric DOM index therefore loses
+    # the rest of a result page (the previous implementation stopped at 13 on
+    # a 25-card page).  Keep stable lead URLs for the current page and advance
+    # the actual results scroller whenever its visible window is exhausted.
+    page_seen = set(str(value) for value in cursor.get("page_seen", []) if value)
+    requested_scroll_top = int(cursor.get("scroll_top", 0))
+    scroll_state = await page.evaluate(
+        """scrollTop => {
+          const container = document.querySelector('#search-results-container')
+            || document.querySelector('[data-x--search-results-container]');
+          if (!container) return { found: false, top: 0, height: 0, client: 0 };
+          // Do not write `0` on the initial card.  Sales Navigator treats a
+          // programmatic scroll event as a virtual-list refresh and can
+          // invalidate the name-link click immediately afterwards.
+          if (scrollTop > 0) container.scrollTop = Math.max(0, scrollTop);
+          return {
+            found: true,
+            top: Math.round(container.scrollTop),
+            height: Math.round(container.scrollHeight),
+            client: Math.round(container.clientHeight),
+          };
+        }""",
+        requested_scroll_top,
+    )
+    await page.wait_for_timeout(350)
     cards = await scraper._get_all_profile_cards(page)
-    if card_index >= len(cards):
+    card = None
+    card_key = ""
+    card_lead_href = ""
+    card_visible_index = 0
+    for visible_index, visible_card in enumerate(cards):
+        lead = await visible_card.query_selector('a[href*="/sales/lead/"]')
+        card_key = (await lead.get_attribute("href")) if lead else ""
+        if not card_key:
+            card_key = " ".join((await visible_card.text_content() or "").split())[:400]
+        if card_key and card_key not in page_seen:
+            card = visible_card
+            card_visible_index = visible_index
+            card_lead_href = card_key
+            break
+
+    if card is None:
+        # Move down by most of the viewport, preserving overlap so a lazy
+        # render cannot skip a card at a list-window boundary.
+        top = int(scroll_state.get("top") or 0)
+        height = int(scroll_state.get("height") or 0)
+        client = int(scroll_state.get("client") or 0)
+        next_top = min(max(0, height - client), top + max(300, int(client * 0.7)))
+        if scroll_state.get("found") and next_top > top + 2:
+            next_cursor = {
+                "page": page_number,
+                "extracted": extracted,
+                "max_pages": max_pages,
+                "max_profiles": max_profiles,
+                "fast": bool(cursor.get("fast")),
+                "automation": bool(cursor.get("automation")),
+                "locked_search_url": str(cursor.get("locked_search_url") or ""),
+                "page_seen": list(page_seen),
+                "scroll_top": next_top,
+            }
+            return {"current": extracted, "total": max_profiles, "cursor": next_cursor, "done": False}
         if page_number >= max_pages or not await scraper._has_next_page(page):
             return {"done": True, "current": extracted, "total": extracted, "cursor": cursor}
         await scraper._go_to_next_page(page)
         page_number += 1
-        card_index = 0
+        page_seen = set()
+        await page.evaluate(
+            """() => {
+              const container = document.querySelector('#search-results-container')
+                || document.querySelector('[data-x--search-results-container]');
+              if (container) container.scrollTop = 0;
+            }"""
+        )
+        scroll_state = {"top": 0, "height": 0, "client": 0}
+        await page.wait_for_timeout(500)
         cards = await scraper._get_all_profile_cards(page)
         if not cards:
             return {"done": True, "current": extracted, "total": extracted, "cursor": cursor}
+        card = cards[0]
+        card_visible_index = 0
+        lead = await card.query_selector('a[href*="/sales/lead/"]')
+        card_key = (await lead.get_attribute("href")) if lead else ""
+        if not card_key:
+            card_key = " ".join((await card.text_content() or "").split())[:400]
+        card_lead_href = card_key if card_key.startswith("/") else ""
 
-    profile = await scraper._parse_profile_card(cards[card_index], page)
-    card_index += 1
+    # Open the exact mounted result through Locator semantics.  ElementHandle
+    # clicks are flaky in SalesNav's virtual list; this is same interaction
+    # verified by drawer-debug against live Chromium.
+    if not cursor.get("fast"):
+        # Match the exact stable lead URL rather than a visible-card index.
+        # The result list is virtualized: its DOM order can change between
+        # discovery and click, which otherwise opens a different drawer.
+        live_name_link = page.locator(
+            f'a[data-control-name="view_lead_panel_via_search_lead_name"][href="{card_lead_href}"]'
+        ) if card_lead_href else page.locator('a[data-control-name="view_lead_panel_via_search_lead_name"]').nth(card_visible_index)
+        if await live_name_link.count():
+            # Public-profile/contact dialogs can remain in modal outlet after
+            # prior lead. Dismiss harmless overlay before next card.
+            await page.keyboard.press("Escape")
+            await live_name_link.scroll_into_view_if_needed()
+            await live_name_link.click(timeout=8_000, force=True)
+            try:
+                await page.wait_for_selector(
+                    'button[aria-label="Open actions overflow menu"]',
+                    state="attached", timeout=8_000
+                )
+            except Exception:
+                # SalesNav occasionally declines one drawer after a modal.
+                # Preserve this result card and let later cards continue.
+                pass
+
+        drawer_text = ""
+        drawer = page.locator("div.lead-sidesheet")
+        if await drawer.count():
+            drawer_text = await drawer.first.inner_text()
+        if "trouble loading" in drawer_text.lower():
+            # This is a Sales Navigator error panel, not an empty profile.
+            # Refresh the locked search once and retry the same unmarked card.
+            if cursor.get("drawer_recovery_attempted"):
+                raise HTTPException(status_code=502, detail="Sales Navigator drawer still reports Trouble loading after refresh")
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=60_000)
+            await scraper._wait_for_results(page)
+            retry_cursor = {
+                **cursor,
+                "drawer_recovery_attempted": True,
+                "page_seen": list(page_seen),
+                "scroll_top": int(scroll_state.get("top") or 0),
+            }
+            return {"current": extracted, "total": max_profiles, "cursor": retry_cursor, "done": False}
+
+    profile = (
+        await scraper.parse_profile_card_fast(card, page)
+        if cursor.get("fast")
+        else await scraper._parse_profile_card(card, page)
+    )
+    if card_key:
+        page_seen.add(card_key)
     if profile:
         extracted += 1
+    # Public-profile actions may replace this tab in some SalesNav variants.
+    # Every extract call must leave browser on same locked result search.
+    if "/sales/search/people" not in page.url:
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=60_000)
+        await scraper._wait_for_results(page)
     next_cursor = {
         "page": page_number,
-        "card_index": card_index,
         "extracted": extracted,
         "max_pages": max_pages,
         "max_profiles": max_profiles,
+        "fast": bool(cursor.get("fast")),
+        "automation": bool(cursor.get("automation")),
+        "locked_search_url": str(cursor.get("locked_search_url") or ""),
+        "page_seen": list(page_seen),
+        "scroll_top": int(scroll_state.get("top") or 0),
     }
     done = extracted >= max_profiles
     return {
@@ -438,25 +605,40 @@ async def map_profile(payload: SessionPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="LinkedIn profile URL required")
     page = await session.context.new_page()
     root = payload.url.split("?")[0].rstrip("/")
-    sections = ["experience", "education", "skills", "languages"]
+    sections = ["experience", "education", "skills", "languages", "certifications"]
     result: dict[str, Any] = {
         "linkedin_url": root,
         "source": "linkedin_local_profile",
         "sections": {},
+        "section_items": {},
     }
     try:
         await page.goto(root, wait_until="domcontentloaded", timeout=60_000)
         if _auth_required(page.url):
             return {"auth_required": True, "current_url": page.url}
+        if await _salesnav_rate_limited(page):
+            return {"rate_limited": True, "current_url": page.url}
         await page.wait_for_timeout(1500)
         result.update(await page.evaluate(
             """() => {
               const text = (selector) => document.querySelector(selector)?.textContent?.trim() || '';
               const main = document.querySelector('main');
-              const lines = (main?.innerText || '').split('\n').map(v => v.trim()).filter(Boolean);
+              const lines = (main?.innerText || '').split(String.fromCharCode(10)).map(v => v.trim()).filter(Boolean);
+              const aboutHeading = [...(main?.querySelectorAll('h2') || [])].find(node =>
+                /^(about|о себе|общие сведения)$/i.test((node.innerText || '').trim())
+              );
+              const aboutSection = aboutHeading?.closest('section');
+              const aboutLines = (aboutSection?.innerText || '').split(String.fromCharCode(10))
+                .map(v => v.trim()).filter(Boolean)
+                .filter(v => !/^(about|о себе|общие сведения)$/i.test(v));
+              const fullName = text('main h1') || text('main h2') || lines[0] || '';
+              const headerLines = lines.slice(Math.max(0, lines.indexOf(fullName) + 1), 8)
+                .filter(v => v !== '·' && !v.startsWith('·') && !/^(contact info|contact details|контактные сведения)$/i.test(v));
               return {
-                full_name: text('main h1') || text('main h2') || lines[0] || '',
-                headline: text('main .text-body-medium') || lines[1] || '',
+                full_name: fullName,
+                headline: text('main .text-body-medium') || headerLines[0] || '',
+                location: headerLines[1] || '',
+                bio: aboutLines.join(' ').slice(0, 5000),
                 raw_text: (main?.innerText || '').slice(0, 12000)
               };
             }"""
@@ -465,21 +647,135 @@ async def map_profile(payload: SessionPayload) -> dict[str, Any]:
             url = f"{root}/details/{section}/"
             await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             await page.wait_for_timeout(1000)
-            result["sections"][section] = await page.locator("main").inner_text(timeout=10_000)
-        result["bio"] = "\n\n".join(
-            text[:8000] for text in result["sections"].values() if text
-        )[:20000]
-        result["positions"] = [{"raw_text": result["sections"].get("experience", "")[:8000]}]
-        result["educations"] = [{"raw_text": result["sections"].get("education", "")[:8000]}]
-        result["skills"] = [
-            line.strip() for line in result["sections"].get("skills", "").splitlines()
-            if line.strip() and len(line.strip()) < 100
-        ][:100]
-        result["languages"] = [
-            line.strip() for line in result["sections"].get("languages", "").splitlines()
-            if line.strip() and len(line.strip()) < 100
-        ][:50]
+            if await _salesnav_rate_limited(page):
+                return {"rate_limited": True, "current_url": page.url}
+            main = page.locator("main")
+            result["sections"][section] = await main.inner_text(timeout=10_000)
+            result["section_items"][section] = await main.evaluate(
+                r"""main => [...main.querySelectorAll('li')]
+                  .filter(item => !item.querySelector('li'))
+                  .map(item => ({
+                    lines: (item.innerText || '').split(String.fromCharCode(10))
+                      .map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean),
+                    links: [...item.querySelectorAll('a[href]')].map(link => ({
+                      text: (link.innerText || link.textContent || '').trim(), href: link.href
+                    })).filter(link => link.text),
+                  }))
+                  .filter(item => item.lines.length > 0)"""
+            )
         return {"profile": result}
+    finally:
+        await page.close()
+
+
+@app.post("/sessions/profile-header", dependencies=[Depends(authorize)])
+async def map_profile_header(payload: SessionPayload) -> dict[str, Any]:
+    """Read only the public profile header for fast location repair/resolution."""
+    session = _session(payload.session_id)
+    if not payload.url or "linkedin.com/in/" not in payload.url:
+        raise HTTPException(status_code=400, detail="LinkedIn profile URL required")
+    page = await session.context.new_page()
+    try:
+        root = payload.url.split("?")[0].rstrip("/")
+        await page.goto(root, wait_until="domcontentloaded", timeout=60_000)
+        await page.wait_for_timeout(1200)
+        if _auth_required(page.url):
+            return {"auth_required": True, "current_url": page.url}
+        if await _salesnav_rate_limited(page):
+            return {"rate_limited": True, "current_url": page.url}
+        profile = await page.evaluate(
+            r"""() => {
+              const main = document.querySelector('main');
+              const lines = (main?.innerText || '').split(String.fromCharCode(10))
+                .map(v => v.replace(/\s+/g, ' ').trim()).filter(Boolean);
+              const fullName = document.querySelector('main h1')?.textContent?.trim()
+                || document.querySelector('main h2')?.textContent?.trim() || lines[0] || '';
+              const header = lines.slice(Math.max(0, lines.indexOf(fullName) + 1), 8)
+                .filter(v => v !== '·' && !v.startsWith('·')
+                  && !/^(contact info|contact details|контактные сведения)$/i.test(v));
+              return {
+                full_name: fullName,
+                headline: document.querySelector('main .text-body-medium')?.textContent?.trim() || header[0] || '',
+                location: header[1] || '',
+                raw_text: lines.slice(0, 20).join(String.fromCharCode(10)),
+              };
+            }"""
+        )
+        return {"profile": profile, "current_url": page.url}
+    finally:
+        await page.close()
+
+
+@app.post("/sessions/resolve-public-url", dependencies=[Depends(authorize)])
+async def resolve_public_url(payload: SessionPayload) -> dict[str, Any]:
+    """Resolve one SalesNav lead to its public profile via the read-only action menu."""
+    session = _session(payload.session_id)
+    if not payload.url or "linkedin.com/sales/lead/" not in payload.url:
+        raise HTTPException(status_code=400, detail="Sales Navigator lead URL required")
+    page = await session.context.new_page()
+    try:
+        await page.goto(payload.url, wait_until="domcontentloaded", timeout=60_000)
+        await page.wait_for_timeout(1500)
+        if _auth_required(page.url):
+            return {"auth_required": True, "current_url": page.url}
+        if await _salesnav_rate_limited(page):
+            return {"rate_limited": True, "current_url": page.url}
+        scraper = SalesNavScraper(li_at_cookie="", headless=False, max_profiles=1, max_pages=1)
+        public_url = await scraper.sidebar_extractor.extract_profile_url_with_retry(page, 2)
+        diagnostics = {}
+        if "/in/" not in public_url:
+            diagnostics = await page.evaluate(
+                r"""() => ({
+                  buttons: [...document.querySelectorAll('button')]
+                    .filter(node => node.offsetParent !== null)
+                    .map(node => ({
+                      text: (node.innerText || '').replace(/\s+/g, ' ').trim(),
+                      aria: node.getAttribute('aria-label') || '',
+                      control: node.getAttribute('data-control-name') || '',
+                    })).filter(item => item.text || item.aria).slice(0, 80),
+                  publicLinks: [...document.querySelectorAll('a[href*="/in/"]')]
+                    .map(node => node.href).slice(0, 20),
+                })"""
+            )
+        return {
+            "public_url": public_url if "/in/" in public_url else "",
+            "current_url": page.url,
+            "diagnostics": diagnostics,
+        }
+    finally:
+        await page.close()
+
+
+@app.post("/sessions/public-search", dependencies=[Depends(authorize)])
+async def search_public_profiles(payload: SessionPayload) -> dict[str, Any]:
+    """Search authenticated LinkedIn people results for public profile candidates."""
+    session = _session(payload.session_id)
+    query = " ".join(str(payload.text or "").split())
+    if not query:
+        raise HTTPException(status_code=400, detail="Profile search query required")
+    page = await session.context.new_page()
+    try:
+        url = f"https://www.linkedin.com/search/results/people/?keywords={quote_plus(query)}"
+        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        await page.wait_for_timeout(3000)
+        if _auth_required(page.url):
+            return {"auth_required": True, "current_url": page.url}
+        if await _salesnav_rate_limited(page):
+            return {"rate_limited": True, "current_url": page.url}
+        candidates = await page.evaluate(
+            r"""() => {
+              const seen = new Set();
+              return [...document.querySelectorAll('main a[href*="/in/"]')]
+                .map(link => {
+                  const href = (link.href || '').split('?')[0];
+                  const container = link.closest('li') || link.closest('[data-view-name]') || link.parentElement;
+                  return {href, text: (container?.innerText || link.innerText || '').replace(/\s+/g, ' ').trim()};
+                })
+                .filter(item => item.href && !seen.has(item.href) && seen.add(item.href))
+                .slice(0, 20);
+            }"""
+        )
+        return {"query": query, "candidates": candidates, "current_url": page.url}
     finally:
         await page.close()
 
