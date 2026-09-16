@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
@@ -532,10 +533,21 @@ async def open_browser_search(
 ) -> dict[str, Any]:
     session = await get_browser_session(session_id, current)
     job = _job(session["job_id"], current)
-    if payload.url:
+    target_url = payload.url or session.get("locked_search_url")
+    if target_url:
+        parsed = urlparse(target_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "www.linkedin.com"
+            or not parsed.path.startswith("/sales/search/people")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="URL must be a LinkedIn Sales Navigator people search",
+            )
         agent = await _agent_call(
             "/sessions/open",
-            {"session_id": session_id, "url": payload.url},
+            {"session_id": session_id, "url": target_url},
         )
     else:
         keyword_parts = [
@@ -549,7 +561,7 @@ async def open_browser_search(
         )
     state = "awaiting_auth" if agent.get("awaiting_auth") else "manual_control"
     result = get_supabase().table("browser_sessions").update({
-        "state": state, "current_url": agent.get("current_url", payload.url)
+        "state": state, "current_url": agent.get("current_url", target_url)
     }).eq("id", session_id).eq("org_id", current.org_id).execute()
     _publish_browser(session["job_id"], session_id, "browser.url_changed", current_url=result.data[0]["current_url"], state=state)
     return result.data[0]

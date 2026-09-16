@@ -121,7 +121,9 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
   const [privateInput, setPrivateInput] = useState(true);
   const [inputError, setInputError] = useState("");
   const [filterNote, setFilterNote] = useState("");
+  const [salesNavUrl, setSalesNavUrl] = useState("");
   useEffect(() => { if (openRequested) { setOpen(true); onOpenHandled(); } }, [openRequested, onOpenHandled]);
+  useEffect(() => { setSalesNavUrl(session?.current_url || ""); }, [session?.id, session?.current_url]);
   const command = async (action: "open-search" | "lock-search" | "take-control" | "release-control") => {
     if (!session) return;
     setInputError("");
@@ -134,6 +136,31 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
       onSession({ ...created, ...await browserCommand(created.id, "open-search") });
     } catch (error) { setInputError(error instanceof Error ? error.message : "Could not open Sales Navigator"); }
     finally { setBusy(false); }
+  };
+  const openSalesNavUrl = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!session) return;
+    setInputError("");
+    let url: URL;
+    try {
+      url = new URL(salesNavUrl.trim());
+    } catch {
+      setInputError("Paste a full https://www.linkedin.com/sales/search/people URL");
+      return;
+    }
+    if (url.protocol !== "https:" || url.hostname !== "www.linkedin.com" || !url.pathname.startsWith("/sales/search/people")) {
+      setInputError("URL must be a LinkedIn Sales Navigator people search");
+      return;
+    }
+    setBusy(true);
+    try {
+      onSession({ ...session, ...await browserCommand(session.id, "open-search", { url: url.toString() }) });
+      setOpen(true);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "Could not open Sales Navigator URL");
+    } finally {
+      setBusy(false);
+    }
   };
   const prepareFilters = async () => {
     if (!session) return;
@@ -207,6 +234,14 @@ function BrowserPanel({ jobId, session, onSession, openRequested, onOpenHandled 
     </div>
     {visible && session?.state === "awaiting_auth" && <div className="p-3 bg-orange-500/10 text-orange-300 border-b border-orange-500/30">LinkedIn needs login or mobile approval. Complete it in browser, then lock search.</div>}
     {visible && session && <div className="grid md:grid-cols-4 gap-2 p-3 border-b border-[var(--border)] bg-[var(--surface)] text-xs"><div className="rounded border border-[var(--accent)]/40 p-2"><b>1. Search</b><br /><span className="text-[var(--muted)]">Opened from job title and skills.</span></div><div className="rounded border border-[var(--border)] p-2"><b>2. Filters</b><br /><span className="text-[var(--muted)]">Apply suggestions, then edit inside SalesNav.</span></div><div className="rounded border border-[var(--border)] p-2"><b>3. Review</b><br /><span className="text-[var(--muted)]">Check results, title, geography, exclusions.</span></div><div className="rounded border border-[var(--border)] p-2"><b>4. Lock & extract</b><br /><span className="text-[var(--muted)]">Lock exact search, then start bounded extraction.</span></div></div>}
+    {visible && session && <form onSubmit={openSalesNavUrl} className="p-3 border-b border-[var(--border)] bg-[var(--surface)]">
+      <label className="block text-xs text-[var(--muted)] mb-2" htmlFor="salesnav-url">Sales Navigator search URL</label>
+      <div className="flex flex-wrap gap-2">
+        <input id="salesnav-url" type="url" value={salesNavUrl} onChange={event => setSalesNavUrl(event.target.value)} placeholder="https://www.linkedin.com/sales/search/people?..." className="input text-sm flex-1 min-w-60" autoComplete="off" />
+        <button type="submit" disabled={busy || !salesNavUrl.trim()} className="btn-primary text-xs px-3 py-1.5 disabled:opacity-40">Open link</button>
+      </div>
+      <div className="text-[10px] text-[var(--muted)] mt-1">Paste assembled people-search link, open it, review results, then lock search.</div>
+    </form>}
     {visible && session && <div className="p-3 border-b border-[var(--border)] bg-[var(--surface)]">
       <div className="text-xs text-[var(--muted)] mb-2">Click a field inside Sales Navigator, then type or paste here. Text is sent directly to Chromium and never stored.</div>
       <div className="flex flex-wrap items-center gap-2">
@@ -267,6 +302,12 @@ export function WorkflowWorkspace({ jobId, mode = "sources" }: { jobId: string; 
   }, [jobId, selectedDataset]);
   useEffect(() => { load().catch(e => setError(e.message)); }, [jobId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!event) return; load(); if (event.type === "browser.auth_required") { try { const context = new AudioContext(); const oscillator = context.createOscillator(); oscillator.connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.2); new Notification("Sourcer needs LinkedIn approval", { body: "Complete login in embedded browser." }); } catch {} } }, [event]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const live = stages.some(stage => ["pending", "running", "pause_requested", "awaiting_auth"].includes(stage.status));
+    if (!live) return;
+    const timer = window.setInterval(() => load().catch(error => setError(error.message)), 2000);
+    return () => window.clearInterval(timer);
+  }, [stages, load]);
   useEffect(() => { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission(); }, []);
 
   const pipelineKeyByStage = useMemo(() => {
